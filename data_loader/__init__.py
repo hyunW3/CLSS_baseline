@@ -1,5 +1,5 @@
-PASCAL_DIR = "/dataset/VOC2012"
-ADE_DIR = "/dataset/ADEChallengeData2016"
+PASCAL_DIR = "./dataset/VOC2012"
+ADE_DIR = "./dataset/ADEChallengeData2016"
 DATASETS_IMG_DIRS = {"voc": PASCAL_DIR, "ade": ADE_DIR}
 
 VOC = ['background',

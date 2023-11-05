@@ -1,0 +1,57 @@
+{
+    // IntelliSense를 사용하여 가능한 특성에 대해 알아보세요.
+    // 기존 특성에 대한 설명을 보려면 가리킵니다.
+    // 자세한 내용을 보려면 https://go.microsoft.com/fwlink/?linkid=830387을(를) 방문하세요.
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "15-1_step0",
+            "preLaunchTask" : "rm_folder",
+            "type": "python",
+            "request": "launch",
+            "program": "train_voc.py",
+            "args" : ["-c",
+            "configs/config_voc.json",
+            "-d",
+            "0",
+            "--multiprocessing_distributed",
+            "--dist_url",
+            "tcp://127.0.0.1:12345",
+            "--save_dir",
+            "saved_voc",
+            "--name",
+            "DKD",
+            "--task_name",
+            "15-1",
+            "--task_setting",
+            "overlap",
+            "--task_step",
+            "0",
+            "--lr",
+            "0.001",
+            "--bs",
+            "8",
+            "--pos_weight",
+            "2"],
+            "console": "integratedTerminal",
+            "justMyCode": true
+        },
+        {
+            "name": "TEST:ade50-50",
+            "type": "python",
+            "request": "launch",
+            "program" : "eval_ade.py",
+            "args" : ["-d","0","--test", "-r", "./saved_ade/models/overlap_50-50_DKD/step_2/checkpoint-epoch100.pth"],
+            "console": "integratedTerminal",
+            "justMyCode": true
+        },
+        {
+            "name": "Python: Current File",
+            "type": "python",
+            "request": "launch",
+            "program": "${file}",
+            "console": "integratedTerminal",
+            "justMyCode": true
+        }
+    ]
+}

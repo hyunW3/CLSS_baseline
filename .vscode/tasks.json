@@ -1,0 +1,12 @@
+{
+    "version": "2.0.0",
+    "tasks" : [
+        {
+            "label": "rm_folder",
+            "command": "rm -r ${workspaceFolder}/saved_voc/logs/overlap_15-1_DKD/ ${workspaceFolder}/saved_voc/models/overlap_15-1_DKD/ || echo not_exist",
+            // "args" : ["-r", "saved_voc/logs/overlap_15-1_DKD/", 
+            //     "saved_voc/models/overlap_15-1_DKD/"],
+            "type": "shell",
+        }
+    ]
+}
