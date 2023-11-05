@@ -33,6 +33,7 @@ def main(config):
 
 
 def main_worker(gpu, ngpus_per_node, config):
+    # what if gpu == None
     if config['multiprocessing_distributed']:
         config.config['rank'] = config['rank'] * ngpus_per_node + gpu
 

@@ -156,6 +156,7 @@ def main_worker(gpu, ngpus_per_node, config):
 
     old_classes, _ = dataset.get_task_labels(step=0)
     new_classes = []
+    # new classes : step 1 ~ task_step
     for i in range(1, task_step + 1):
         c, _ = dataset.get_task_labels(step=i)
         new_classes += c

@@ -122,7 +122,7 @@ class Trainer_base(BaseTrainer):
                     logit[:, -self.n_new_classes:],  # [N, |Ct|, H, W]
                     data['label'],                # [N, H, W]
                 ).mean(dim=[0, 2, 3])  # [|Ct|]
-
+                # why logit[:,0:1] ? only care about 1st new class?
                 loss_ac = self.ACLoss(logit[:, 0:1]).mean(dim=[0, 2, 3])  # [1]
 
                 loss = self.config['hyperparameter']['mbce'] * loss_mbce.sum() + self.config['hyperparameter']['ac'] * loss_ac.sum()
