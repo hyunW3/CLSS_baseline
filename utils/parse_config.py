@@ -59,8 +59,6 @@ class ConfigParser:
         # log_dir_exist does not required
         try:
             if self.config['test'] is True:
-                if save_dir_exist is False: # newly created
-                    self.save_dir.rmdir()
                 raise FileExistsError
             # log_dir_exist = self.log_dir.exists()
             self.log_dir.mkdir(parents=True, exist_ok=exist_ok)
