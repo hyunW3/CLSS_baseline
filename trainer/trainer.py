@@ -8,6 +8,7 @@ from base import BaseTrainer
 from utils import MetricTracker, MetricTracker_scalars
 from models.loss import WBCELoss, KDLoss, ACLoss
 from data_loader import VOC
+from data_loader import ADE
 
 
 class Trainer_base(BaseTrainer):
@@ -46,8 +47,13 @@ class Trainer_base(BaseTrainer):
 
         self.task_info = task_info
         self.n_old_classes = len(self.task_info['old_class'])  # 0
-        self.n_new_classes = len(self.task_info['new_class'])  # 19-1: 19 | 15-5: 15 | 15-1: 15...
-
+        # voc : 19-1: 19 | 15-5: 15 | 15-1: 15...
+        # ade : 100-50: 100 | 100-10: 100 | 50-50: 50 |
+        self.n_new_classes = len(self.task_info['new_class'])  
+        self.name = self.task_info['name']
+        self.step = self.task_info['step']
+        self.dataset_type = self.get_dataset_type()
+        
         self.train_loader = data_loader[0]
         if self.train_loader is not None:
             self.len_epoch = len(self.train_loader)
@@ -204,7 +210,7 @@ class Trainer_base(BaseTrainer):
                     log.update({met.__name__ + '_harmonic': f"{met()['harmonic']:.2f}"})
                 if 'overall' in met().keys():
                     log.update({met.__name__ + '_overall': f"{met()['overall']:.2f}"})
-                if 'by_class' in met().keys():
+                if 'by_class' in met().keys() and self.dataset_type == 'voc':
                     by_class_str = '\n'
                     for i in range(len(met()['by_class'])):
                         if i in self.evaluator_val.new_classes_idx:
@@ -258,7 +264,7 @@ class Trainer_base(BaseTrainer):
                     log.update({met.__name__ + '_harmonic': f"{met()['harmonic']:.2f}"})
                 if 'overall' in met().keys():
                     log.update({met.__name__ + '_overall': f"{met()['overall']:.2f}"})
-                if 'by_class' in met().keys():
+                if 'by_class' in met().keys() and self.dataset_type == 'voc':
                     by_class_str = '\n'
                     for i in range(len(met()['by_class'])):
                         if i in self.evaluator_test.new_classes_idx:

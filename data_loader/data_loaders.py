@@ -11,6 +11,7 @@ class VOCIncrementalDataLoader():
 
         self.step = task['step']
         self.name = task['name']
+        self.dataset_type = 'voc'
         self.classes_idx_new, self.classes_idx_old = get_task_labels('voc', self.name, self.step)
         self.setting = task['setting']
         self.n_classes = len(list(set(self.classes_idx_new + self.classes_idx_old)))
@@ -118,6 +119,8 @@ class VOCIncrementalDataLoader():
             step = self.step
         return get_task_labels('voc', self.name, step)
 
+    def get_dataset_type(self): 
+        return self.dataset_type
 
 class ADEIncrementalDataLoader():
     def __init__(self, task, train, val, test, num_workers, pin_memory, memory=None):
@@ -126,6 +129,7 @@ class ADEIncrementalDataLoader():
         
         self.step = task['step']
         self.name = task['name']
+        self.dataset_type = 'ade'
         self.classes_idx_new, self.classes_idx_old = \
             get_task_labels('ade', self.name, self.step)
         self.setting = task['setting']
@@ -235,3 +239,6 @@ class ADEIncrementalDataLoader():
         if step is None:
             step = self.step
         return get_task_labels('ade', self.name, step)
+        
+    def get_dataset_type(self): 
+        return self.dataset_type
