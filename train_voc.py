@@ -13,7 +13,8 @@ import models.model as module_arch
 import utils.metric as module_metric
 import utils.lr_scheduler as module_lr_scheduler
 import data_loader.data_loaders as module_data
-from trainer.trainer_voc import Trainer_base, Trainer_incremental
+# from trainer.trainer_voc import Trainer_base, Trainer_incremental
+from trainer.trainer import Trainer_base, Trainer_incremental
 from utils.parse_config import ConfigParser
 from logger.logger import Logger
 from utils.memory import memory_sampling_balanced
@@ -59,12 +60,13 @@ def main_worker(gpu, ngpus_per_node, config):
     task_name = config['data_loader']['args']['task']['name']
     task_setting = config['data_loader']['args']['task']['setting']
 
-    # Create Dataloader
+    # Create Dataloader/
     dataset = config.init_obj('data_loader', module_data)
 
     # Create old Model
     if task_step > 0:
-        model_old = config.init_obj('arch', module_arch, **{"classes": dataset.get_per_task_classes(task_step - 1)})
+        model_old = config.init_obj('arch', module_arch, **{"method" : config['method'], \
+                                                            "classes": dataset.get_per_task_classes(task_step - 1)})
         if config['multiprocessing_distributed'] and (config['arch']['args']['norm_act'] == 'bn_sync'):
             model_old = nn.SyncBatchNorm.convert_sync_batchnorm(model_old)
     else:
@@ -97,7 +99,8 @@ def main_worker(gpu, ngpus_per_node, config):
     logger.info(f"New Classes: {new_classes}")
 
     # Create Model
-    model = config.init_obj('arch', module_arch, **{"classes": dataset.get_per_task_classes()})
+    model = config.init_obj('arch', module_arch, **{"method" : config['method'], \
+                                                    "classes": dataset.get_per_task_classes()})
     model._set_bn_momentum(model.backbone, momentum=0.01)
 
     # Convert BN to SyncBN for DDP
@@ -115,8 +118,11 @@ def main_worker(gpu, ngpus_per_node, config):
         if model_old is not None:
             model_old._load_pretrained_model(f'{old_path}')
             
-        if config['hyperparameter']['ac'] > 0:
+        if config['method'] == 'DKD' and config['hyperparameter']['ac'] > 0:
             logger.info('** Proposed Initialization Technique using an Auxiliary Classifier**')
+            model.init_novel_classifier()
+        elif config['method'] == 'MiB':
+            logger.info('** Proposed Initialization Technique using background classifier*')
             model.init_novel_classifier()
         else:
             logger.info('** Random Initialization **')
@@ -233,4 +239,6 @@ if __name__ == '__main__':
         CustomArgs(['--test'], action='store_true', target='test'),
     ]
     config = ConfigParser.from_args(args, options)
+    assert config['method'] in ['DKD', 'MiB'], "Only DKD and MiB are supported"
+    assert config['method'] in config['name'], f"Name should contain the method name, {config['method']} in {config['name']}"
     main(config)

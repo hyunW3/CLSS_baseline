@@ -9,6 +9,7 @@ from models.modules import ResNet101, ASPP
 class DeepLabV3(nn.Module):
     def __init__(
         self,
+        method='DKD',
         output_stride=16,
         norm_act='bn_sync',
         backbone_pretrained=False,
@@ -18,6 +19,7 @@ class DeepLabV3(nn.Module):
         freeze_backbone_bn=False,
     ):
         super().__init__()
+        self.method = method
         self.norm_act = norm_act
         if norm_act == 'iabn_sync':
             from inplace_abn import ABN, InPlaceABNSync
@@ -38,8 +40,23 @@ class DeepLabV3(nn.Module):
         # Network
         self.backbone = ResNet101(norm, norm_act, output_stride, backbone_pretrained)
         self.aspp = ASPP(2048, 256, 256, norm_act=norm_act, norm=norm, output_stride=output_stride)
-        self.cls = nn.ModuleList([nn.Conv2d(256, c, kernel_size=1, bias=use_bias) for c in [1] + classes])  # cls[0]: an auxiliary classifier
+        # if method == 'DKD'
+        # cls[0]: an auxiliary classifier
+        # if method = 'MiB
+        # cls[0] : background classifier
+        # classes = [5,3,3,3] for 5-3 step 4
+        self.cls = nn.ModuleList([nn.Conv2d(256, c, kernel_size=1, bias=use_bias) for c in [1] + classes])  
+
+        
+        
         self._init_classifier()
+
+        # given : 2 step(15-1) 
+        #       - MiB: new: 17 class / old : 0~16 classes
+        #       - DKD: new: 17 class / old : 1~16 classes
+        #
+        # MiB classifier : (D, 18)   # 0th cls is background
+        # DKD classifier : (D, 17+1) # 0th cls is auxiliary classifier
 
     def forward(self, x, ret_intermediate=False):
         out_size = x.shape[-2:]  # spatial size
@@ -108,12 +125,24 @@ class DeepLabV3(nn.Module):
                 nn.init.constant_(m.bias, 0)
 
     def init_novel_classifier(self):
-        # Initialize novel classifiers using an auxiliary classifier
-        cls = self.cls[-1]  # New class classifier
-        for i in range(self.classes[-1]):
-            cls.weight[i:i + 1].data.copy_(self.cls[0].weight)
-            cls.bias[i:i + 1].data.copy_(self.cls[0].bias)
-
+        if self.method == 'DKD':
+            # Initialize novel classifiers using an auxiliary classifier
+            cls = self.cls[-1]  # New class classifier
+            for i in range(self.classes[-1]):
+                cls.weight[i:i + 1].data.copy_(self.cls[0].weight)
+                cls.bias[i:i + 1].data.copy_(self.cls[0].bias)
+        elif self.method == 'MiB':
+            # Initialize novel classifiers using a background classifier
+            cls = self.cls[-1]  # New class classifier  
+            # TODO Check whether it is right
+            # As MiB code implemented
+            bias_diff = torch.log(torch.FloatTensor([self.classes[-1]+1]))
+            new_bias = self.cls[0].bias.data - bias_diff
+            for i in range(self.classes[-1]):
+                cls.weight[i:i+1].data.copy_(self.cls[0].weight)
+                cls.bias[i:i+1].data.copy_(new_bias)
+        else :
+            raise NotImplementedError
     def freeze_bn(self, affine_freeze=False):
         if self.freeze_all_bn:
             for m in self.modules():

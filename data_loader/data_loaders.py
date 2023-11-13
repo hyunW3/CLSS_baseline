@@ -106,7 +106,7 @@ class VOCIncrementalDataLoader():
             return f"The number of datasets: {len(self.train_set)} / {len(self.val_set)} / {len(self.test_set)}"
 
     def task_info(self):
-        return {"setting": self.setting, "name": self.name, "step": self.step,
+        return {"setting": self.setting, "name": self.name, "step": self.step, "dataset" : self.dataset_type,
                 "old_class": self.classes_idx_old, "new_class": self.classes_idx_new}
 
     def get_per_task_classes(self, step=None):

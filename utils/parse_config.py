@@ -30,7 +30,7 @@ class ConfigParser:
         exper_name = \
             self.config['data_loader']['args']['task']['setting'] + '_' \
             + self.config['data_loader']['args']['task']['name'] + '_'\
-            + self.config['name']
+            + self.config['name'] +  f"_{self.config['name']}" if self.config['name'] != self.config['method'] else ""
 
         if self.run_id is None:  # use timestamp as default run-id
             # run_id = datetime.now().strftime(r'%m%d_%H%M%S')

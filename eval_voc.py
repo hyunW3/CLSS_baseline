@@ -13,7 +13,8 @@ import models.model as module_arch
 import utils.metric as module_metric
 import utils.lr_scheduler as module_lr_scheduler
 import data_loader.data_loaders as module_data
-from trainer.trainer_voc import Trainer_base, Trainer_incremental
+# from trainer.trainer_voc import Trainer_base, Trainer_incremental
+from trainer.trainer import Trainer_base, Trainer_incremental
 from utils.parse_config import ConfigParser
 from logger.logger import Logger
 
