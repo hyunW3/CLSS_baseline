@@ -51,7 +51,8 @@ class Trainer_base(BaseTrainer):
         # voc : 19-1: 19 | 15-5: 15 | 15-1: 15...
         # ade : 100-50: 100 | 100-10: 100 | 50-50: 50 |
         self.n_new_classes = len(self.task_info['new_class'])  
-        self.name = self.task_info['name']
+        # self.name = self.config['name']
+        # self.method = self.config['method']
         self.step = self.task_info['step']
         self.dataset_type = self.task_info['dataset']
 
@@ -77,9 +78,9 @@ class Trainer_base(BaseTrainer):
         if self.evaluator_test is not None:
             self.metric_ftns_test = [getattr(self.evaluator_test, met) for met in config['metrics']]
 
-        if self.config['name'] == 'DKD':
+        if self.config['method'] == 'DKD':
             self.loss_name = ['loss', 'loss_mbce', 'loss_ac']
-        elif self.config['name'] == 'MiB':
+        elif self.config['method'] == 'MiB':
             self.loss_name = ['loss', 'loss_CE', 'loss_KD']
         self.train_metrics = MetricTracker(
             keys=self.loss_name,
@@ -91,25 +92,25 @@ class Trainer_base(BaseTrainer):
 
         if config.resume is not None:
             self._resume_checkpoint(config.resume, config['test'])
-        if self.config['name'] == 'DKD':
+        if self.config['method'] == 'DKD':
             pos_weight = torch.ones([len(self.task_info['new_class'])], device=self.device) * self.config['hyperparameter']['pos_weight']
             self.BCELoss = WBCELoss(pos_weight=pos_weight, n_old_classes=self.n_old_classes + 1, n_new_classes=self.n_new_classes)
             self.ACLoss = ACLoss()
-        elif self.config['name'] == 'MiB' :
+        elif self.config['method'] == 'MiB' :
             self.CEloss = UnbiasedCrossEntropy(old_cl=self.n_old_classes, ignore_index=255, reduction='none')
         else :
-            raise NotImplementedError
+            raise NotImplementedError(self.config['method'])
 
         self._print_train_info()
 
     def _print_train_info(self):
-        if self.config['name'] == 'DKD':
+        if self.config['method'] == 'DKD':
             self.logger.info(f"pos_weight - {self.config['hyperparameter']['pos_weight']}")
             self.logger.info(f"Total loss = {self.config['hyperparameter']['mbce']} * L_mbce + {self.config['hyperparameter']['ac']} * L_ac")
-        elif self.config['name'] == 'MiB' :
+        elif self.config['method'] == 'MiB' :
             self.logger.info(f"Total loss = L_UnCE + {self.config['hyperparameter']['kd']} * L_UnKD (alpha : {self.config['hyperparameter']['alpha']})")
         else :
-            raise NotImplementedError   
+            raise NotImplementedError(self.config['method'])
     def _train_epoch(self, epoch):
         """
         Training logic for an epoch
@@ -137,11 +138,11 @@ class Trainer_base(BaseTrainer):
             # print(data['image'].shape, data['label'].shape) # torch.Size([6, 3, 512, 512]) torch.Size([6, 512, 512])
             with torch.cuda.amp.autocast(enabled=self.config['use_amp']):
                 logit, features = self.model(data['image'], ret_intermediate=False)
-                if self.config['name'] == 'DKD':    
+                if self.config['method'] == 'DKD':    
                     loss_mbce, _, loss_ac, _, _ = loss_DKD(logit, data['label'], self.n_old_classes, self.n_new_classes,\
                                                             self.BCELoss, self.ACLoss)
                     loss = self.config['hyperparameter']['mbce'] * loss_mbce.sum() + self.config['hyperparameter']['ac'] * loss_ac.sum()
-                elif self.config['name'] == 'MiB':
+                elif self.config['method'] == 'MiB':
                     loss_CE, _ = loss_MiB(logit, data['label'], self.n_old_classes, self.n_new_classes,
                                             self.CEloss)
                     loss = loss_CE
@@ -153,13 +154,13 @@ class Trainer_base(BaseTrainer):
             
             self.writer.set_step((epoch - 1) * self.len_epoch + batch_idx)
             self.train_metrics.update('loss', loss.item())
-            if self.config['name'] == 'DKD':   
+            if self.config['method'] == 'DKD':   
                 self.train_metrics.update('loss_mbce', loss_mbce.mean().item())
                 self.train_metrics.update('loss_ac', loss_ac.mean().item())
-            elif self.config['name'] == 'MiB':
+            elif self.config['method'] == 'MiB':
                 self.train_metrics.update('loss_CE', loss_CE.mean().item())
             else :
-                raise NotImplementedError
+                raise NotImplementedError(self.config['method'])
             # Get First lr
             if batch_idx == 0:
                 self.writer.add_scalars('lr', {'lr': self.optimizer.param_groups[0]['lr']}, epoch - 1)
@@ -199,13 +200,13 @@ class Trainer_base(BaseTrainer):
                 target = data['label'].cpu().numpy()
 
                 logit, _ = self.model(data['image'])
-                if self.config['name'] == 'DKD':
+                if self.config['method'] == 'DKD':
                     logit = torch.sigmoid(logit)
                     pred = logit[:, 1:].argmax(dim=1) + 1  # pred: [N. H, W]
                     idx = (logit[:, 1:] > 0.5).float()  # logit: [N, C, H, W]
                     idx = idx.sum(dim=1)  # logit: [N, H, W]
                     pred[idx == 0] = 0  # set background (non-target class)
-                elif self.config['name'] == 'MiB':
+                elif self.config['method'] == 'MiB':
                     _, pred = logit.max(dim=1)
                 pred = pred.cpu().numpy()
                 self.evaluator_val.add_batch(target, pred)
@@ -317,9 +318,9 @@ class Trainer_incremental(Trainer_base):
             if model_old is not None:
                 self.model_old = nn.DataParallel(model_old, device_ids=self.device_ids)
 
-        if self.config['name'] == 'DKD':
+        if self.config['method'] == 'DKD':
             self.loss_name = ['loss', 'loss_mbce', 'loss_kd', 'loss_dkd_pos', 'loss_dkd_neg', 'loss_ac']
-        elif self.config['name'] == 'MiB':
+        elif self.config['method'] == 'MiB':
             self.loss_name = ['loss', 'loss_CE', 'loss_KD']
         self.train_metrics = MetricTracker(
             keys=self.loss_name,
@@ -328,23 +329,23 @@ class Trainer_incremental(Trainer_base):
         if config.resume is not None:
             self._resume_checkpoint(config.resume, config['test'])
 
-        if self.config['name'] == 'DKD':
+        if self.config['method'] == 'DKD':
             self.KDLoss = KDLoss(pos_weight=None, reduction='none')
-        elif self.config['name'] == 'MiB' :
+        elif self.config['method'] == 'MiB' :
             self.KDLoss = UnbiasedKnowledgeDistillationLoss(alpha=self.config['hyperparameter']['alpha'])
         else :
-            raise NotImplementedError
+            raise NotImplementedError(self.config['method'])
 
     def _print_train_info(self):
-        if self.config['name'] == 'DKD':
+        if self.config['method'] == 'DKD':
             self.logger.info(f"pos_weight - {self.config['hyperparameter']['pos_weight']}")
             self.logger.info(f"Total loss = {self.config['hyperparameter']['mbce']} * L_mbce + {self.config['hyperparameter']['kd']} * L_kd "
                             f"+ {self.config['hyperparameter']['dkd_pos']} * L_dkd_pos + {self.config['hyperparameter']['dkd_neg']} * L_dkd_neg "
                             f"+ {self.config['hyperparameter']['ac']} * L_ac")
-        elif self.config['name'] == 'MiB' :
+        elif self.config['method'] == 'MiB' :
             self.logger.info(f"Total loss = L_UnCE + {self.config['hyperparameter']['kd']} * L_UnKD (alpha : {self.config['hyperparameter']['alpha']})")
         else :
-            raise NotImplementedError   
+            raise NotImplementedError(self.config['method'])
     def _train_epoch(self, epoch):
         """
         Training logic for an epoch
@@ -391,20 +392,20 @@ class Trainer_incremental(Trainer_base):
                                                 self.CEloss,self.KDLoss, logit_old)
                     loss = loss_CE + self.config['hyperparameter']['kd'] * loss_KD
                 else :
-                    raise NotImplementedError
+                    raise NotImplementedError(self.config['method'])
             self.scaler.scale(loss).backward()
             self.scaler.step(self.optimizer)
             self.scaler.update()
 
             self.writer.set_step((epoch - 1) * self.len_epoch + batch_idx)
             self.train_metrics.update('loss', loss.item())
-            if self.config['name'] == 'DKD':
+            if self.config['method'] == 'DKD':
                 self.train_metrics.update('loss_mbce', loss_mbce.mean().item())
                 self.train_metrics.update('loss_kd', loss_kd.mean().item())
                 self.train_metrics.update('loss_ac', loss_ac.mean().item())
                 self.train_metrics.update('loss_dkd_pos', loss_dkd_pos.mean().item())
                 self.train_metrics.update('loss_dkd_neg', loss_dkd_neg.mean().item())
-            elif self.config['name'] == 'MiB':
+            elif self.config['method'] == 'MiB':
                 self.train_metrics.update('loss_CE', loss_CE.mean().item())
                 self.train_metrics.update('loss_KD', loss_KD.mean().item())
             # Get First lr

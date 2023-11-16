@@ -1,3 +1,4 @@
+from math import exp
 import os
 # import logging
 from pathlib import Path
@@ -26,12 +27,12 @@ class ConfigParser:
 
         # set save_dir where trained model and log will be saved.
         save_dir = Path(self.config['trainer']['save_dir'])
-        method = f"_{self.config['name']}" if self.config['name'] != self.config['method'] else ""
-        expr_time = datetime.now().strftime(r'%m%d_%H%M%S')
+        method = f"_{self.config['name']}" if self.config['method'] not in self.config['name'] else ""
+        expr_time = datetime.now().strftime(r'%y%m%d_%H%M')
         exper_name = \
             self.config['data_loader']['args']['task']['setting'] + '_' \
             + self.config['data_loader']['args']['task']['name'] + '_'\
-            + self.config['name'] + method + f"_seed{self.config['seed']}_{expr_time}"
+            + self.config['name'] + method
 
         if self.run_id is None:  # use timestamp as default run-id
             # run_id = datetime.now().strftime(r'%m%d_%H%M%S')
@@ -45,24 +46,37 @@ class ConfigParser:
         try:
             if self.config['test'] is True:
                 raise FileExistsError
-            save_dir_exist = self.save_dir.exists()
-            self.save_dir.mkdir(parents=True, exist_ok=exist_ok)
+            if self.save_dir.exists() is False:
+                self.save_dir.mkdir(parents=True, exist_ok=exist_ok)
+            else :
+                raise FileExistsError
         except FileExistsError:
             if self.config['test'] is True:
                 run_id = datetime.now().strftime(r'%m%d_%H%M%S')
                 self._save_dir = save_dir / 'models' / exper_name / f'test_{run_id}'
-                save_dir_exist = self.save_dir.exists()
                 self.save_dir.mkdir(parents=True, exist_ok=exist_ok)
-                pass
             else:
-                raise FileExistsError
-        # log mkdir -> need to check save_dir is newly created or already exists
-        # log_dir_exist does not required
+                idx = 0
+                while True:
+                    idx += 1
+                    exper_name = \
+                        self.config['data_loader']['args']['task']['setting'] + '_' \
+                        + self.config['data_loader']['args']['task']['name'] + '_'\
+                        + self.config['name'] + method + "_" + str(idx)
+                    self._save_dir = save_dir / 'models' / exper_name / self.run_id 
+                    self._log_dir = save_dir / 'log' / exper_name / self.run_id
+                    if self.save_dir.exists() is False:
+                        break
+                self.save_dir.mkdir(parents=True, exist_ok=exist_ok)
+        print(self._save_dir)
         try:
             if self.config['test'] is True:
                 raise FileExistsError
             # log_dir_exist = self.log_dir.exists()
-            self.log_dir.mkdir(parents=True, exist_ok=exist_ok)
+            if self.log_dir.exists() is False:
+                self.log_dir.mkdir(parents=True, exist_ok=exist_ok)
+            else :
+                raise FileExistsError
         except FileExistsError:
             if self.config['test'] is True:
                 run_id = datetime.now().strftime(r'%m%d_%H%M%S')
@@ -71,8 +85,6 @@ class ConfigParser:
                 self.log_dir.mkdir(parents=True, exist_ok=exist_ok)
                 pass
             else:
-                if save_dir_exist is False: # newly created
-                    self.save_dir.rmdir()
                 raise FileExistsError
 
         # save updated config file to the checkpoint dir

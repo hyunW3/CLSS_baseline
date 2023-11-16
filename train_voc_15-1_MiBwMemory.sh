@@ -10,9 +10,8 @@ TASKNAME='15-1'
 EPOCH=30
 INIT_LR=0.01
 LR=0.001
-OPTION=$@ # --set_deterministic
 # INIT_POSWEIGHT=2
-MEMORY_SIZE=10  # 100 for DKD-M
+MEMORY_SIZE=100  # 100 for DKD-M
 
 # check deterministic string exist in OPTION 
 if [[ $OPTION == *"--set_deterministic"* ]]; then
@@ -26,47 +25,28 @@ fi
 if [ $MEMORY_SIZE -ne 0 ]; then
     NAME=${NAME}_M${MEMORY_SIZE}
 fi
-# if `find "./saved_voc/models/overlap_15-1_"$NAME"/" -name "*.pth"` ; then
-#     echo "Found saved model."
-#     echo "==========="
-#     echo `find "./saved_voc/models/overlap_15-1_"$NAME -name "*.pth"`
-#     echo "==========="
-#     echo "Do you want to remove whole folder? [y/n]"
-#     read answer
-#     if [ $answer = "y" ] ; then
-#         rm -r "./saved_voc/models/overlap_15-1_"$name
-#         rm -r "./saved_voc/models/overlap_15-1_"$NAME
-#     else 
-#         echo "Continue."
-#     fi
-# else
-#     echo "No saved model found."
-#     rm -r "./saved_voc/models/overlap_15-1_"$NAME
-#     rm -r "./saved_voc/models/overlap_15-1_"$NAME
-# fi
 
-
-alert_knock python train_voc.py -c configs/config_voc_MiB.json \
+alert_knock python train_voc.py -c configs/config_voc_MiB_seed0.json \
 -d ${GPU} --multiprocessing_distributed --dist_url ${PORT} --save_dir ${SAVEDIR} --name ${NAME} \
---task_name ${TASKNAME} --task_setting ${TASKSETTING} --task_step 0 --lr ${INIT_LR} --bs ${BS} && # --pos_weight ${INIT_POSWEIGHT}
+--task_name ${TASKNAME} --task_setting ${TASKSETTING} --task_step 0 --lr ${INIT_LR} --bs ${BS} && # --pos_weight ${INIT_POSWEIGHT} 
 
-alert_knock python train_voc.py -c configs/config_voc_MiB.json \
+alert_knock python train_voc.py -c configs/config_voc_MiB_seed0.json \
 -d ${GPU} --multiprocessing_distributed --dist_url ${PORT} --save_dir ${SAVEDIR} --name ${NAME} \
 --task_name ${TASKNAME} --task_setting ${TASKSETTING} --task_step 1 --lr ${LR} --bs ${BS} --freeze_bn --mem_size ${MEMORY_SIZE}
 
-alert_knock python train_voc.py -c configs/config_voc_MiB.json \
+alert_knock python train_voc.py -c configs/config_voc_MiB_seed0.json \
 -d ${GPU} --multiprocessing_distributed --dist_url ${PORT} --save_dir ${SAVEDIR} --name ${NAME} \
 --task_name ${TASKNAME} --task_setting ${TASKSETTING} --task_step 2 --lr ${LR} --bs ${BS} --freeze_bn --mem_size ${MEMORY_SIZE}
 
-alert_knock python train_voc.py -c configs/config_voc_MiB.json \
+alert_knock python train_voc.py -c configs/config_voc_MiB_seed0.json \
 -d ${GPU} --multiprocessing_distributed --dist_url ${PORT} --save_dir ${SAVEDIR} --name ${NAME} \
 --task_name ${TASKNAME} --task_setting ${TASKSETTING} --task_step 3 --lr ${LR} --bs ${BS} --freeze_bn --mem_size ${MEMORY_SIZE}
 
-alert_knock python train_voc.py -c configs/config_voc_MiB.json \
+alert_knock python train_voc.py -c configs/config_voc_MiB_seed0.json \
 -d ${GPU} --multiprocessing_distributed --dist_url ${PORT} --save_dir ${SAVEDIR} --name ${NAME} \
 --task_name ${TASKNAME} --task_setting ${TASKSETTING} --task_step 4 --lr ${LR} --bs ${BS} --freeze_bn --mem_size ${MEMORY_SIZE}
 
-alert_knock python train_voc.py -c configs/config_voc_MiB.json \
+alert_knock python train_voc.py -c configs/config_voc_MiB_seed0.json \
 -d ${GPU} --multiprocessing_distributed --dist_url ${PORT} --save_dir ${SAVEDIR} --name ${NAME} \
 --task_name ${TASKNAME} --task_setting ${TASKSETTING} --task_step 5 --lr ${LR} --bs ${BS} --freeze_bn --mem_size ${MEMORY_SIZE}
 

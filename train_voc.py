@@ -56,9 +56,11 @@ def main_worker(gpu, ngpus_per_node, config):
     np.random.seed(SEED)
     random.seed(SEED)
     # newly added
-    os.environ["PYTHONHASHSEED"] = str(SEED)
-    torch.backends.cudnn.deterministic = True  
-    torch.backends.cudnn.benchmark = True  
+    if config['set_deterministic']:
+        logger.info('** Set deterministic **')
+        os.environ["PYTHONHASHSEED"] = str(SEED)
+        torch.backends.cudnn.deterministic = True  
+        torch.backends.cudnn.benchmark = True  
     # Task information
     task_step = config['data_loader']['args']['task']['step']
     task_name = config['data_loader']['args']['task']['name']
@@ -226,6 +228,7 @@ if __name__ == '__main__':
     options = [
         CustomArgs(['--multiprocessing_distributed'], action='store_true', target='multiprocessing_distributed'),
         CustomArgs(['--dist_url'], type=str, target='dist_url'),
+        CustomArgs(['--set_deterministic'], type=float, target='set_deterministic is True'),
 
         CustomArgs(['--name'], type=str, target='name'),
         CustomArgs(['--save_dir'], type=str, target='trainer;save_dir'),
@@ -247,7 +250,6 @@ if __name__ == '__main__':
         CustomArgs(['--dkd_pos'], type=float, target='hyperparameter;dkd_pos'),
         CustomArgs(['--dkd_neg'], type=float, target='hyperparameter;dkd_neg'),
         CustomArgs(['--ac'], type=float, target='hyperparameter;ac'),
-
         CustomArgs(['--freeze_bn'], action='store_true', target='arch;args;freeze_all_bn'),
         CustomArgs(['--test'], action='store_true', target='test'),
     ]
