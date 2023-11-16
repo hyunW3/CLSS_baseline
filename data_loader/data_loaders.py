@@ -3,7 +3,6 @@ from torch.utils.data import DataLoader, random_split, ConcatDataset
 from data_loader.task import get_task_labels, get_per_task_classes
 from data_loader.dataset import VOCSegmentationIncremental, ADESegmentationIncremental, VOCSegmentationIncrementalMemory, ADESegmentationIncrementalMemory
 
-
 class VOCIncrementalDataLoader():
     def __init__(self, task, train, val, test, num_workers, pin_memory, memory=None):
         self.task = task
@@ -15,6 +14,7 @@ class VOCIncrementalDataLoader():
         self.classes_idx_new, self.classes_idx_old = get_task_labels('voc', self.name, self.step)
         self.setting = task['setting']
         self.n_classes = len(list(set(self.classes_idx_new + self.classes_idx_old)))
+
 
         self.train_set = VOCSegmentationIncremental(
             setting=self.setting,
@@ -227,7 +227,7 @@ class ADEIncrementalDataLoader():
             return f"The number of datasets: {len(self.train_set)} / {len(self.val_set)} / {len(self.test_set)}"
 
     def task_info(self):
-        return {"setting": self.setting, "name": self.name, "step": self.step,
+        return {"setting": self.setting, "name": self.name, "step": self.step, "dataset" : self.dataset_type,
                 "old_class": self.classes_idx_old, "new_class": self.classes_idx_new}
 
     def get_per_task_classes(self, step=None):

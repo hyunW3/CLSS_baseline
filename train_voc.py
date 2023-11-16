@@ -1,3 +1,4 @@
+import os,sys
 import argparse
 import random
 import collections
@@ -54,13 +55,16 @@ def main_worker(gpu, ngpus_per_node, config):
     torch.cuda.manual_seed_all(SEED)
     np.random.seed(SEED)
     random.seed(SEED)
-
+    # newly added
+    os.environ["PYTHONHASHSEED"] = str(SEED)
+    torch.backends.cudnn.deterministic = True  
+    torch.backends.cudnn.benchmark = True  
     # Task information
     task_step = config['data_loader']['args']['task']['step']
     task_name = config['data_loader']['args']['task']['name']
     task_setting = config['data_loader']['args']['task']['setting']
 
-    # Create Dataloader/
+    # Create Dataloader
     dataset = config.init_obj('data_loader', module_data)
 
     # Create old Model
@@ -131,23 +135,32 @@ def main_worker(gpu, ngpus_per_node, config):
 
     # Build optimizer
     if task_step > 0:
+        # if config['method'] == 'DKD'
         optimizer = config.init_obj(
             'optimizer',
             torch.optim,
             [{"params": model.get_backbone_params(), "weight_decay": 0},
-             {"params": model.get_aspp_params(), "lr": config["optimizer"]["args"]["lr"] * 10, "weight_decay": 0},
-             {"params": model.get_old_classifer_params(), "lr": config["optimizer"]["args"]["lr"] * 10, "weight_decay": 0},
-             {"params": model.get_new_classifer_params(), "lr": config["optimizer"]["args"]["lr"] * 10}]
+             {"params": model.get_aspp_params(), "weight_decay": 0},
+             {"params": model.get_old_classifer_params(), "weight_decay": 0},
+             {"params": model.get_new_classifer_params()}]
         )
-    else:
+        if config['method'] == 'DKD':
+            optimizer.param_groups[1]['lr'] = config["optimizer"]["args"]["lr"] * 10
+            optimizer.param_groups[2]['lr'] = config["optimizer"]["args"]["lr"] * 10
+            optimizer.param_groups[3]['lr'] = config["optimizer"]["args"]["lr"] * 10
+    else: # step 0
         optimizer = config.init_obj(
             'optimizer',
             torch.optim,
             [{"params": model.get_backbone_params()},
-             {"params": model.get_aspp_params(), "lr": config["optimizer"]["args"]["lr"] * 10},
-             {"params": model.get_classifer_params(), "lr": config["optimizer"]["args"]["lr"] * 10}]
+             {"params": model.get_aspp_params()},
+             {"params": model.get_classifer_params()}]
         )
-
+        if config['method'] == 'DKD':
+            optimizer.param_groups[1]['lr'] = config["optimizer"]["args"]["lr"] * 10
+            optimizer.param_groups[2]['lr'] = config["optimizer"]["args"]["lr"] * 10
+    
+    logger.info(f"Opimizer : {optimizer}")
     lr_scheduler = config.init_obj(
         'lr_scheduler',
         module_lr_scheduler,
@@ -160,8 +173,8 @@ def main_worker(gpu, ngpus_per_node, config):
         *[dataset.n_classes + 1, [0], new_classes]
     )
 
-    old_classes, _ = dataset.get_task_labels(step=0)
-    new_classes = []
+    old_classes, _ = dataset.get_task_labels(step=0) # 5 (1,2,3,4,5)
+    new_classes = [] # setp1 추가되는 친구들 들어감. 
     # new classes : step 1 ~ task_step
     for i in range(1, task_step + 1):
         c, _ = dataset.get_task_labels(step=i)

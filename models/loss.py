@@ -162,6 +162,7 @@ class UnbiasedKnowledgeDistillationLoss(nn.Module):
         labels = torch.softmax(targets, dim=1)                        # B, BKG + OLD_CL, H, W
 
         # make the average on the classes 1/n_cl \sum{c=1..n_cl} L_c
+        # print(labels[:,0].shape, outputs_bkg.shape, labels[:,1:].shape, outputs_no_bgk.shape)
         loss = (labels[:, 0] * outputs_bkg + (labels[:, 1:] * outputs_no_bgk).sum(dim=1)) / targets.shape[1]
 
         if mask is not None:

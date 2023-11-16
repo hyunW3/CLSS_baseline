@@ -30,7 +30,7 @@ def inf_loop(data_loader):
 
 
 class MetricTracker:
-    def __init__(self, *keys, writer=None, colums=['total', 'counts', 'average']):
+    def __init__(self, keys, writer=None, colums=['total', 'counts', 'average']):
         self.writer = writer
         self._data = pd.DataFrame(index=keys, columns=colums)
         self.reset()

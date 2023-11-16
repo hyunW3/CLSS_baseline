@@ -33,7 +33,7 @@ class DeepLabV3(nn.Module):
         self.freeze_backbone_bn = freeze_backbone_bn
 
         self.classes = classes
-        self.tot_classes = reduce(lambda a, b: a + b, self.classes)
+        # self.tot_classes = reduce(lambda a, b: a + b, self.classes)
         self.use_cosine = use_cosine
         use_bias = not use_cosine
 
@@ -44,19 +44,12 @@ class DeepLabV3(nn.Module):
         # cls[0]: an auxiliary classifier
         # if method = 'MiB
         # cls[0] : background classifier
-        # classes = [5,3,3,3] for 5-3 step 4
+        # classes = [5,3,3,3] for 5-3 step 4 
         self.cls = nn.ModuleList([nn.Conv2d(256, c, kernel_size=1, bias=use_bias) for c in [1] + classes])  
 
         
         
         self._init_classifier()
-
-        # given : 2 step(15-1) 
-        #       - MiB: new: 17 class / old : 0~16 classes
-        #       - DKD: new: 17 class / old : 1~16 classes
-        #
-        # MiB classifier : (D, 18)   # 0th cls is background
-        # DKD classifier : (D, 17+1) # 0th cls is auxiliary classifier
 
     def forward(self, x, ret_intermediate=False):
         out_size = x.shape[-2:]  # spatial size
@@ -138,9 +131,10 @@ class DeepLabV3(nn.Module):
             # As MiB code implemented
             bias_diff = torch.log(torch.FloatTensor([self.classes[-1]+1]))
             new_bias = self.cls[0].bias.data - bias_diff
-            for i in range(self.classes[-1]):
+            for i in range(self.classes[-1]): # 1 5 3 3 3 / 6 3 3 3
                 cls.weight[i:i+1].data.copy_(self.cls[0].weight)
-                cls.bias[i:i+1].data.copy_(new_bias)
+                cls.bias[i:i+1].data.copy_(new_bias)    
+            self.cls[0].bias.data.copy_(new_bias) 
         else :
             raise NotImplementedError
     def freeze_bn(self, affine_freeze=False):

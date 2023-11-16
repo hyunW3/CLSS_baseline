@@ -26,11 +26,12 @@ class ConfigParser:
 
         # set save_dir where trained model and log will be saved.
         save_dir = Path(self.config['trainer']['save_dir'])
-
+        method = f"_{self.config['name']}" if self.config['name'] != self.config['method'] else ""
+        expr_time = datetime.now().strftime(r'%m%d_%H%M%S')
         exper_name = \
             self.config['data_loader']['args']['task']['setting'] + '_' \
             + self.config['data_loader']['args']['task']['name'] + '_'\
-            + self.config['name'] +  f"_{self.config['name']}" if self.config['name'] != self.config['method'] else ""
+            + self.config['name'] + method + f"_seed{self.config['seed']}_{expr_time}"
 
         if self.run_id is None:  # use timestamp as default run-id
             # run_id = datetime.now().strftime(r'%m%d_%H%M%S')
