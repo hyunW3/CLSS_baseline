@@ -1,10 +1,8 @@
 {
-    "name": "DKD",
-    "method" : "DKD",
-    "n_gpu": 1,
-    "multiprocessing_distributed": false,
-    "rank": 0,
+    "name" : "MiB",
+    "method": "MiB",
     "world_size": 1,
+    "rank" : 0,
     "dist_backend": "nccl",
     "dist_url": "tcp://127.0.0.1:12345",
     "seed": 1,
@@ -12,17 +10,17 @@
     "arch": {
         "type": "DeepLabV3",
         "args": {
-            "output_stride": 16,
-            "norm_act": "bn_sync",
-            "backbone_pretrained": true,
-            "freeze_all_bn": false
+            "output_stride": 16, // checked
+            "norm_act": "iabn_sync", // checked
+            "backbone_pretrained": true, // checked
+            "freeze_all_bn": false 
         }
     },
     "data_loader": {
-        "type": "ADEIncrementalDataLoader",
+        "type": "VOCIncrementalDataLoader",
         "args": {
             "task": {
-                "name": "100-50",
+                "name": "15-1",
                 "step": 0,
                 "setting": "overlap",
                 "idxs_path": "./data/"
@@ -44,7 +42,7 @@
                     "transform_args": {
                         "crop_size": 512
                     },
-                    "masking_value": 255
+                    "masking_value": 0
                 },
                 "batch_size": 1
             },
@@ -54,7 +52,7 @@
                     "transform_args": {
                         "crop_size": 512
                     },
-                    "masking_value": 255
+                    "masking_value": 0
                 },
                 "batch_size": 1
             },
@@ -66,23 +64,20 @@
     "optimizer": {
         "type": "SGD",
         "args": {
-            "lr": 0.0025,
-            "weight_decay": 1e-4,
-            "momentum": 0.9,
-            "nesterov": true
+            "lr": 1e-3, // 1e-2 for initial, 1e-3 for incremental
+            "weight_decay": 1e-4, // default in MiB
+            "momentum": 0.9, // default in MiB
+            "nesterov": true, // checked
+            "lr_decay_factor" : 0.1
         }
     },
     "hyperparameter": {
-        "pos_weight": 35,
-        "mbce": 1,
-        "kd": 5,
-        "dkd_pos": 5,
-        "dkd_neg": 5,
-        "ac": 1
+        "alpha" : 1.0,
+        "kd" : 10.0
     },
     "lr_scheduler": {
-        "type": "WarmupPolyLR",
-        "args": {"warmup_iters": 0.2}
+        "type": "PolyLR",
+        "args": {}
     },
     "evaluator": {
         "type": "Evaluator",
@@ -94,8 +89,8 @@
         "Mean_Intersection_over_Union"
     ],
     "trainer": {
-        "epochs": 100,
-        "save_dir": "saved_ade/",
+        "epochs": 30, // checked
+        "save_dir": "saved_voc/",
         "save_period": -1,
         "validation_period": -1,
         "verbosity": 2,

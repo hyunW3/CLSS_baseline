@@ -1,12 +1,12 @@
 {
     "name": "DKD",
-    
+    "method": "DKD",
     "n_gpu": 1,
     "multiprocessing_distributed": false,
     "rank": 0,
     "world_size": 1,
     "dist_backend": "nccl",
-    "dist_url": "tcp://127.0.0.1:12345",
+    "dist_url": "tcp://127.0.0.1:12346",
     "seed": 1,
     "use_amp": true,
     "arch": {
@@ -35,7 +35,7 @@
                     },
                     "masking_value": 0
                 },
-                "batch_size": 32
+                "batch_size": 4
             },
             "val": {
                 "cross_val": false,
