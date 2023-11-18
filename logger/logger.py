@@ -2,7 +2,7 @@ import logging
 import logging.config
 from pathlib import Path
 from utils.utils import read_json
-
+import wandb
 
 class Logger:
     def __init__(
@@ -25,6 +25,16 @@ class Logger:
         assert verbosity in self.log_levels, msg_verbosity
         self.logger = logging.getLogger(name)
         self.logger.setLevel(self.log_levels[verbosity])
+    def set_wandb(self, config):
+        if self.rank == 0:
+            self.wandb = wandb.init(
+                project="[CLSS]_MiB",
+                tags=["baseline", "MiB"],
+            )
+            method = f"_{config['name']}" if config['method'] not in  config['name'] else ""
+            wandb.run.name = config['data_loader']['args']['task']['setting'] + '_' \
+            + config['data_loader']['args']['task']['name'] + '_'\
+            + config['name'] + method + f"_step{config['data_loader']['args']['task']['step']}"
 
     # Print from all rank
     def print(self, msg):
@@ -46,8 +56,15 @@ class Logger:
     def warning(self, msg):
         if self.rank == 0:
             self.logger.warning(msg)
-
-
+    def log_wandb(self, data : dict, step = None):
+        if self.rank == 0:
+            self.wandb.log(data, step=step)
+    def saveconfig_wandb(self, config):
+        if self.rank == 0:
+            self.wandb.config.update(config)
+    def watch_wandb(self, model):
+        if self.rank == 0:
+            self.wandb.watch(model, log="all",log_graph=True)
 def setup_logging(save_dir, log_config='logger/logger_config.json', default_level=logging.INFO):
     """
     Setup logging configuration

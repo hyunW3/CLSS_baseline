@@ -19,6 +19,7 @@
     },
     "data_loader": {
         "type": "VOCIncrementalDataLoader",
+        "dataset_type" : "voc",
         "args": {
             "task": {
                 "name": "15-1",

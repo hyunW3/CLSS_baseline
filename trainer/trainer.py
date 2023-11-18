@@ -10,8 +10,8 @@ from models.loss import WBCELoss, KDLoss, ACLoss, UnbiasedCrossEntropy, Unbiased
 from data_loader import VOC
 from data_loader import ADE
 from models.loss_method import loss_DKD, loss_MiB
-
-
+import wandb
+import numpy as np
 class Trainer_base(BaseTrainer):
     """
     Trainer class for a base step
@@ -192,7 +192,7 @@ class Trainer_base(BaseTrainer):
         log = {}
         self.evaluator_val.reset()
         self.logger.info(f"Number of val loader: {len(self.val_loader)}")
-
+        wandb_log_done = False
         self.model.eval()
         with torch.no_grad():
             for batch_idx, data in enumerate(self.val_loader):
@@ -210,6 +210,17 @@ class Trainer_base(BaseTrainer):
                     _, pred = logit.max(dim=1)
                 pred = pred.cpu().numpy()
                 self.evaluator_val.add_batch(target, pred)
+                labels = data['label'].type(torch.long)
+                if (batch_idx == len(self.test_loader) -1 and wandb_log_done is False) or \
+                    wandb_log_done is False and ( any([lbl in torch.unique(labels) for lbl in self.task_info['new_class']]) ) :
+                    
+                    img = (self.denorm(data['image'][0].detach().cpu().numpy()) * 255).astype(np.uint8).transpose(1,2,0)
+                    pred = self.label2color(pred[0]).astype(np.uint8)
+                    label = self.label2color(labels[0].detach().cpu().numpy()).astype(np.uint8)
+                    concat_img = np.concatenate((img, pred, label), axis=1)  # concat along width, then make H,W,C
+
+                    self.logger.log_wandb({'val/image' : [wandb.Image(concat_img, caption=f'input,pred,label')]},step=epoch)
+                    wandb_log_done = True
 
             if self.rank == 0:
                 self.writer.set_step((epoch), 'valid')
@@ -222,6 +233,7 @@ class Trainer_base(BaseTrainer):
 
                 if 'old' in met().keys():
                     log.update({met.__name__ + '_old': f"{met()['old']:.2f}"})
+
                 if 'new' in met().keys():
                     log.update({met.__name__ + '_new': f"{met()['new']:.2f}"})
                 if 'harmonic' in met().keys():
@@ -236,6 +248,26 @@ class Trainer_base(BaseTrainer):
                         elif i in self.evaluator_val.old_classes_idx:
                             by_class_str = by_class_str + f"{i:2d}  {VOC[i]} {met()['by_class'][i]:.2f}\n"
                     log.update({met.__name__ + '_by_class': by_class_str})
+            # log.update({met.__name__ + '_confusion_matrix': met().confusion_matrix})
+        wandb_log = {}
+        for key, value in log.items():
+            if 'by_class' not in key:
+                wandb_log.update({f"val/{key}": float(value)})
+            # if 'confusion_matrix' in key: # TODO : not ready
+            #     wandb_log.update({f"val/{key}": wandb.plot.confusion_matrix(probs=None,
+            #                                                                 y_true=value.sum(axis=1),
+            #                                                                 preds=value.sum(axis=0),
+            #                                                                 class_names=VOC)})
+            else :
+                by_class = []
+                for s in value.split("\n"):
+                    if s == '':
+                        continue
+                    idx, name, val = [i for i in s.split(" ") if i != '']
+                    by_class.append([int(idx), name, float(val)])
+                wandb_log.update({f"val/{key}": wandb.Table(data=by_class, columns=["idx", "name", "value"])})
+                    
+        self.logger.log_wandb(wandb_log,step=epoch)
         return log
 
     def _test(self, epoch=None):
@@ -246,23 +278,37 @@ class Trainer_base(BaseTrainer):
         self.logger.info(f"Number of test loader: {len(self.test_loader)}")
 
         self.model.eval()
+        wandb_log_done = False
         with torch.no_grad():
             for batch_idx, data in enumerate(self.test_loader):
                 data['image'], data['label'] = data['image'].to(self.device), data['label'].to(self.device)
                 target = data['label'].cpu().numpy()
 
                 logit, features = self.model(data['image'])
-                logit = torch.sigmoid(logit)
-                pred = logit[:, 1:].argmax(dim=1) + 1  # pred: [N. H, W]
+                if self.config['method'] == 'DKD':
+                    logit = torch.sigmoid(logit)
+                    pred = logit[:, 1:].argmax(dim=1) + 1  # pred: [N. H, W]
 
-                idx = (logit[:, 1:] > 0.5).float()  # logit: [N, C, H, W]
-                idx = idx.sum(dim=1)  # logit: [N, H, W]
+                    idx = (logit[:, 1:] > 0.5).float()  # logit: [N, C, H, W]
+                    idx = idx.sum(dim=1)  # logit: [N, H, W]
 
-                pred[idx == 0] = 0  # set background (non-target class)
-
+                    pred[idx == 0] = 0  # set background (non-target class)
+                elif self.config['method'] == 'MiB':
+                    _, pred = logit.max(dim=1)
                 pred = pred.cpu().numpy()
                 self.evaluator_test.add_batch(target, pred)
 
+                labels = data['label'].type(torch.long)
+                if (batch_idx == len(self.test_loader) -1 and wandb_log_done is False) or \
+                    wandb_log_done is False and ( any([lbl in torch.unique(labels) for lbl in self.task_info['new_class']]) ) :
+                    
+                    img = (self.denorm(data['image'][0].detach().cpu().numpy()) * 255).astype(np.uint8).transpose(1,2,0)
+                    pred = self.label2color(pred[0]).astype(np.uint8)
+                    label = self.label2color(labels[0].detach().cpu().numpy()).astype(np.uint8)
+                    concat_img = np.concatenate((img, pred, label), axis=1)  # concat along width, then make H,W,C
+
+                    self.logger.log_wandb({'test/image' : [wandb.Image(concat_img, caption=f'input,pred,label')]},step=epoch)
+                    wandb_log_done = True
             if epoch is not None:
                 if self.rank == 0:
                     self.writer.set_step((epoch), 'test')
@@ -276,6 +322,7 @@ class Trainer_base(BaseTrainer):
 
                 if 'old' in met().keys():
                     log.update({met.__name__ + '_old': f"{met()['old']:.2f}"})
+                    
                 if 'new' in met().keys():
                     log.update({met.__name__ + '_new': f"{met()['new']:.2f}"})
                 if 'harmonic' in met().keys():
@@ -290,6 +337,21 @@ class Trainer_base(BaseTrainer):
                         else:
                             by_class_str = by_class_str + f"{i:2d}  {VOC[i]} {met()['by_class'][i]:.2f}\n"
                     log.update({met.__name__ + '_by_class': by_class_str})
+        
+        wandb_log = {}
+        for key, value in log.items():
+            if 'by_class' not in key:
+                wandb_log.update({f"val/{key}": float(value)})
+            else :
+                by_class = []
+                for s in value.split("\n"):
+                    if s == '':
+                        continue
+                    idx, name, val = [i for i in s.split(" ") if i != '']
+                    by_class.append([int(idx), name, float(val)])
+                wandb_log.update({f"val/{key}": wandb.Table(data=by_class, columns=["idx", "name", "value"])})
+                    
+        self.logger.log_wandb(wandb_log,step=epoch)
         return log
 
 
@@ -319,7 +381,7 @@ class Trainer_incremental(Trainer_base):
                 self.model_old = nn.DataParallel(model_old, device_ids=self.device_ids)
 
         if self.config['method'] == 'DKD':
-            self.loss_name = ['loss', 'loss_mbce', 'loss_kd', 'loss_dkd_pos', 'loss_dkd_neg', 'loss_ac']
+            self.loss_name = ['loss', 'loss_mbce', 'loss_kd', 'loss_ac', 'loss_dkd_pos', 'loss_dkd_neg']
         elif self.config['method'] == 'MiB':
             self.loss_name = ['loss', 'loss_CE', 'loss_KD']
         self.train_metrics = MetricTracker(
@@ -370,10 +432,11 @@ class Trainer_incremental(Trainer_base):
         # Random shuffling
         if not isinstance(self.train_loader.sampler, torch.utils.data.RandomSampler):
             self.train_loader.sampler.set_epoch(epoch)
-        
+        wandb_log_done = False
         for batch_idx, data in enumerate(self.train_loader):
             self.optimizer.zero_grad(set_to_none=True)
             data['image'], data['label'] = data['image'].to(self.device), data['label'].to(self.device)
+            
             with torch.cuda.amp.autocast(enabled=self.config['use_amp']):
                 logit, features = self.model(data['image'], ret_intermediate=True)
 
@@ -388,11 +451,29 @@ class Trainer_incremental(Trainer_base):
                         self.config['hyperparameter']['dkd_pos'] * loss_dkd_pos.sum() + self.config['hyperparameter']['dkd_neg'] * loss_dkd_neg.sum() + \
                         self.config['hyperparameter']['ac'] * loss_ac.sum()
                 elif self.config['method'] == 'MiB':
-                    loss_CE, loss_KD = loss_MiB(logit, data['label'], self.n_old_classes, self.n_new_classes,
+                    loss_out = loss_MiB(logit, data['label'], self.n_old_classes, self.n_new_classes,
                                                 self.CEloss,self.KDLoss, logit_old)
+                    loss_CE, loss_KD = loss_out
                     loss = loss_CE + self.config['hyperparameter']['kd'] * loss_KD
                 else :
                     raise NotImplementedError(self.config['method'])
+                labels = data['label'].type(torch.long)
+                if (batch_idx == len(self.train_loader) -1 and wandb_log_done is False) or \
+                    wandb_log_done is False and ( any([lbl in torch.unique(labels) for lbl in self.task_info['new_class']]) ) :
+                    loss_dict = {'loss': loss.item()}
+                    for key in self.loss_name[1:]:
+                        loss_dict.update({key: loss_out[self.loss_name.index(key)-1].mean().item()})
+                    self.logger.log_wandb(loss_dict,step=epoch)
+                    _, pred = logit.max(dim=1)
+                    _, pred_old = logit_old.max(dim=1)
+                    img = (self.denorm(data['image'][0].detach().cpu().numpy()) * 255).astype(np.uint8)
+                    pred = self.label2color(pred[0].detach().cpu().numpy()).transpose(2, 0, 1).astype(np.uint8)
+                    pred_old = self.label2color(pred_old[0].detach().cpu().numpy()).transpose(2, 0, 1).astype(np.uint8)
+                    label = self.label2color(labels[0].detach().cpu().numpy()).transpose(2, 0, 1).astype(np.uint8)
+                    concat_img = np.concatenate((img, pred,pred_old, label), axis=2).transpose(1,2,0)  # concat along width, then make H,W,C
+
+                    self.logger.log_wandb({'train/image' : [wandb.Image(concat_img, caption=f'input,pred,pred_old,label')]},step=epoch)
+                    wandb_log_done = True
             self.scaler.scale(loss).backward()
             self.scaler.step(self.optimizer)
             self.scaler.update()

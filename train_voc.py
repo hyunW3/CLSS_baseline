@@ -46,8 +46,9 @@ def main_worker(gpu, ngpus_per_node, config):
     # Set looging
     rank = dist.get_rank()
     logger = Logger(config.log_dir, rank=rank)
+    logger.set_wandb(config)
     logger.set_logger(f'train(rank{rank})', verbosity=2)
-
+    logger.saveconfig_wandb(config)
     # fix random seeds for reproduce
     SEED = config['seed']
     torch.manual_seed(SEED)
@@ -56,7 +57,8 @@ def main_worker(gpu, ngpus_per_node, config):
     np.random.seed(SEED)
     random.seed(SEED)
     # newly added
-    if config['set_deterministic']:
+    logger.info(f"SEED: {SEED}, determinisitc {config['set_deterministic']}")
+    if config['set_deterministic'] is True:
         logger.info('** Set deterministic **')
         os.environ["PYTHONHASHSEED"] = str(SEED)
         torch.backends.cudnn.deterministic = True  
@@ -108,7 +110,7 @@ def main_worker(gpu, ngpus_per_node, config):
     model = config.init_obj('arch', module_arch, **{"method" : config['method'], \
                                                     "classes": dataset.get_per_task_classes()})
     model._set_bn_momentum(model.backbone, momentum=0.01)
-
+    logger.watch_wandb(model)
     # Convert BN to SyncBN for DDP
     if config['multiprocessing_distributed'] and (config['arch']['args']['norm_act'] == 'bn_sync'):
         model = nn.SyncBatchNorm.convert_sync_batchnorm(model)
@@ -132,6 +134,7 @@ def main_worker(gpu, ngpus_per_node, config):
             model.init_novel_classifier()
         else:
             logger.info('** Random Initialization **')
+        logger.watch_wandb(model_old)
     else:
         logger.info('Train from scratch')
 
@@ -146,7 +149,7 @@ def main_worker(gpu, ngpus_per_node, config):
              {"params": model.get_old_classifer_params(), "weight_decay": 0},
              {"params": model.get_new_classifer_params()}]
         )
-        if config['method'] == 'DKD':
+        if config['method'] == 'DKD' or config['trainer']['boost_lr'] is True:
             optimizer.param_groups[1]['lr'] = config["optimizer"]["args"]["lr"] * 10
             optimizer.param_groups[2]['lr'] = config["optimizer"]["args"]["lr"] * 10
             optimizer.param_groups[3]['lr'] = config["optimizer"]["args"]["lr"] * 10
@@ -158,11 +161,11 @@ def main_worker(gpu, ngpus_per_node, config):
              {"params": model.get_aspp_params()},
              {"params": model.get_classifer_params()}]
         )
-        if config['method'] == 'DKD':
+        if config['method'] == 'DKD' or config['trainer']['boost_lr'] is True:
             optimizer.param_groups[1]['lr'] = config["optimizer"]["args"]["lr"] * 10
             optimizer.param_groups[2]['lr'] = config["optimizer"]["args"]["lr"] * 10
+    logger.info(optimizer)
     
-    logger.info(f"Opimizer : {optimizer}")
     lr_scheduler = config.init_obj(
         'lr_scheduler',
         module_lr_scheduler,
@@ -228,8 +231,8 @@ if __name__ == '__main__':
     options = [
         CustomArgs(['--multiprocessing_distributed'], action='store_true', target='multiprocessing_distributed'),
         CustomArgs(['--dist_url'], type=str, target='dist_url'),
-        CustomArgs(['--set_deterministic'], type=float, target='set_deterministic is True'),
-
+        CustomArgs(['--set_deterministic'], action='store_true', target='set_deterministic'),
+        CustomArgs(['--boost_lr'], action='store_true', target='trainer;boost_lr'),
         CustomArgs(['--name'], type=str, target='name'),
         CustomArgs(['--save_dir'], type=str, target='trainer;save_dir'),
 
@@ -238,6 +241,7 @@ if __name__ == '__main__':
         CustomArgs(['--seed'], type=int, target='seed'),
         CustomArgs(['--ep', '--epochs'], type=int, target='trainer;epochs'),
         CustomArgs(['--lr', '--learning_rate'], type=float, target='optimizer;args;lr'),
+
         CustomArgs(['--bs', '--batch_size'], type=int, target='data_loader;args;train;batch_size'),
 
         CustomArgs(['--task_name'], type=str, target='data_loader;args;task;name'),

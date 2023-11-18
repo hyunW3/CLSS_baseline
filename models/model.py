@@ -44,7 +44,7 @@ class DeepLabV3(nn.Module):
         # cls[0]: an auxiliary classifier
         # if method = 'MiB
         # cls[0] : background classifier
-        # classes = [5,3,3,3] for 5-3 step 4 
+        # classes = [5,3,3,3] for 5-3 step 4
         self.cls = nn.ModuleList([nn.Conv2d(256, c, kernel_size=1, bias=use_bias) for c in [1] + classes])  
 
         
@@ -127,14 +127,16 @@ class DeepLabV3(nn.Module):
         elif self.method == 'MiB':
             # Initialize novel classifiers using a background classifier
             cls = self.cls[-1]  # New class classifier  
-            # TODO Check whether it is right
             # As MiB code implemented
             bias_diff = torch.log(torch.FloatTensor([self.classes[-1]+1]))
             new_bias = self.cls[0].bias.data - bias_diff
-            for i in range(self.classes[-1]): # 1 5 3 3 3 / 6 3 3 3
+            for i in range(self.classes[-1]):
                 cls.weight[i:i+1].data.copy_(self.cls[0].weight)
                 cls.bias[i:i+1].data.copy_(new_bias)    
-            self.cls[0].bias.data.copy_(new_bias) 
+            # self.cls[0].bias.data.copy_(new_bias)  # it ruins mIoU_new?
+            self.cls[0].bias[0].data.copy_(new_bias.squeeze(0))
+            print("Bg classifier bias[0] updated")
+            # print("No bg classifier updated")
         else :
             raise NotImplementedError
     def freeze_bn(self, affine_freeze=False):
