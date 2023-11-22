@@ -16,11 +16,17 @@
             "type": "shell",
         },
         {
-            "label": "rm_folder_15-3_step4_MiB",
+            "label": "rm_folder_5-3_step4_MiB",
             "command": "rm -r ${workspaceFolder}/saved_voc/log/overlap_5-3_MiB/step_4 ${workspaceFolder}/saved_voc/models/overlap_5-3_MiB/step_4 || echo not_exist",
             // "args" : ["-r", "saved_voc/logs/overlap_15-1_DKD/", 
             //     "saved_voc/models/overlap_15-1_DKD/"],
             "type": "shell",
+        },
+        {
+            "label" : "rm_folder_15-1_step1_MIB_Bias[0]",
+            "command" : 
+            "rm -r /home/hyunwoong/CLSS/baseline/DKD/saved_voc/models/overlap_15-1_MiB_non_deterministic_bias[0]/step_1 /home/hyunwoong/CLSS/baseline/DKD/saved_voc/log/overlap_15-1_MiB_non_deterministic_bias[0]/step_1 || echo not_exist",
+            "type" : "shell"
         }
     ]
 }

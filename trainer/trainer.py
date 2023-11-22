@@ -253,6 +253,7 @@ class Trainer_base(BaseTrainer):
         for key, value in log.items():
             if 'by_class' not in key:
                 wandb_log.update({f"val/{key}": float(value)})
+                wandb_log.update({f"test/{key}": float(value)})
             # if 'confusion_matrix' in key: # TODO : not ready
             #     wandb_log.update({f"val/{key}": wandb.plot.confusion_matrix(probs=None,
             #                                                                 y_true=value.sum(axis=1),
@@ -266,6 +267,7 @@ class Trainer_base(BaseTrainer):
                     idx, name, val = [i for i in s.split(" ") if i != '']
                     by_class.append([int(idx), name, float(val)])
                 wandb_log.update({f"val/{key}": wandb.Table(data=by_class, columns=["idx", "name", "value"])})
+                wandb_log.update({f"test/{key}": wandb.Table(data=by_class, columns=["idx", "name", "value"])})
                     
         self.logger.log_wandb(wandb_log,step=epoch)
         return log
