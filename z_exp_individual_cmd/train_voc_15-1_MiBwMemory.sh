@@ -1,5 +1,5 @@
 #!/bin/bash
-
+cd ../
 PORT='tcp://127.0.0.1:12345'
 GPU=0,1,2,3
 BS=6  # Total 24
