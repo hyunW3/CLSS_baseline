@@ -3,7 +3,6 @@ from torch.utils.data import DataLoader, random_split, ConcatDataset
 from data_loader.task import get_task_labels, get_per_task_classes
 from data_loader.dataset import VOCSegmentationIncremental, ADESegmentationIncremental, VOCSegmentationIncrementalMemory, ADESegmentationIncrementalMemory
 
-
 class VOCIncrementalDataLoader():
     def __init__(self, task, train, val, test, num_workers, pin_memory, memory=None):
         self.task = task
@@ -11,9 +10,11 @@ class VOCIncrementalDataLoader():
 
         self.step = task['step']
         self.name = task['name']
+        self.dataset_type = 'voc'
         self.classes_idx_new, self.classes_idx_old = get_task_labels('voc', self.name, self.step)
         self.setting = task['setting']
         self.n_classes = len(list(set(self.classes_idx_new + self.classes_idx_old)))
+
 
         self.train_set = VOCSegmentationIncremental(
             setting=self.setting,
@@ -105,7 +106,7 @@ class VOCIncrementalDataLoader():
             return f"The number of datasets: {len(self.train_set)} / {len(self.val_set)} / {len(self.test_set)}"
 
     def task_info(self):
-        return {"setting": self.setting, "name": self.name, "step": self.step,
+        return {"setting": self.setting, "name": self.name, "step": self.step, "dataset" : self.dataset_type,
                 "old_class": self.classes_idx_old, "new_class": self.classes_idx_new}
 
     def get_per_task_classes(self, step=None):
@@ -118,6 +119,8 @@ class VOCIncrementalDataLoader():
             step = self.step
         return get_task_labels('voc', self.name, step)
 
+    def get_dataset_type(self): 
+        return self.dataset_type
 
 class ADEIncrementalDataLoader():
     def __init__(self, task, train, val, test, num_workers, pin_memory, memory=None):
@@ -126,6 +129,7 @@ class ADEIncrementalDataLoader():
         
         self.step = task['step']
         self.name = task['name']
+        self.dataset_type = 'ade'
         self.classes_idx_new, self.classes_idx_old = \
             get_task_labels('ade', self.name, self.step)
         self.setting = task['setting']
@@ -223,7 +227,7 @@ class ADEIncrementalDataLoader():
             return f"The number of datasets: {len(self.train_set)} / {len(self.val_set)} / {len(self.test_set)}"
 
     def task_info(self):
-        return {"setting": self.setting, "name": self.name, "step": self.step,
+        return {"setting": self.setting, "name": self.name, "step": self.step, "dataset" : self.dataset_type,
                 "old_class": self.classes_idx_old, "new_class": self.classes_idx_new}
 
     def get_per_task_classes(self, step=None):
@@ -235,3 +239,6 @@ class ADEIncrementalDataLoader():
         if step is None:
             step = self.step
         return get_task_labels('ade', self.name, step)
+        
+    def get_dataset_type(self): 
+        return self.dataset_type

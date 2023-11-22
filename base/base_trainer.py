@@ -1,10 +1,11 @@
+from math import isnan
 import torch
 import torch.nn as nn
 
 from abc import abstractmethod
-from numpy import inf
+from numpy import NaN, inf
 from logger import TensorboardWriter
-
+import utils
 
 class BaseTrainer:
     """
@@ -53,6 +54,10 @@ class BaseTrainer:
 
         self.checkpoint_dir = config.save_dir
 
+        self.label2color = utils.Label2Color(cmap=utils.color_map(config['data_loader']['dataset_type']))  # convert labels to images
+        self.denorm = utils.Denormalize(mean=[0.485, 0.456, 0.406],
+                                std=[0.229, 0.224, 0.225])  # de-normalization for original images
+
         # if config.resume is not None:
         #     self._resume_checkpoint(config.resume)
 
@@ -72,15 +77,15 @@ class BaseTrainer:
         not_improved_count = 0
         for epoch in range(self.start_epoch, self.epochs + 1):
             result, val_flag = self._train_epoch(epoch)
-
+            
             # save logged informations into log dict
             log = {'epoch': epoch}
             log.update(result)
             
+            
             # print logged informations to the screen
             for key, value in log.items():
                 self.logger.info('    {:15s}: {}'.format(str(key), value))
-
             # evaluate model performance according to configured metric, save best checkpoint as model_best
             if self.rank == 0:
                 if val_flag and (self.mnt_mode != 'off'):

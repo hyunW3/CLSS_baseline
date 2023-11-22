@@ -1,6 +1,6 @@
 {
     "name": "DKD",
-    
+    "method" : "DKD",
     "n_gpu": 1,
     "multiprocessing_distributed": false,
     "rank": 0,
@@ -20,6 +20,7 @@
     },
     "data_loader": {
         "type": "ADEIncrementalDataLoader",
+        "dataset_type" : "ade",
         "args": {
             "task": {
                 "name": "100-50",

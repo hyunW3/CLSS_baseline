@@ -172,6 +172,14 @@ class VOCSegmentationIncremental(BaseDataset):
         return composed_transforms(sample['image'], sample['label'])
 
     def transform_target_masking(self, target):
+        """
+        Masking future class object
+        MiB: 255 / PLOP: 0
+        MiB 
+            mask with 0 at trianing - voc.py line 142 in MiB code
+            else 255
+        background class(0) and don't care class(255) are added to the label here
+        """
         if self.test:
             # Masking future class object
             # MiB: 255 / PLOP: 0
@@ -354,7 +362,7 @@ class ADESegmentationIncremental(BaseDataset):
         if self.test:
             # Masking future class object
             # MiB: 255 / PLOP: 0
-            label_list = list(set(self.classes_idx_old + self.classes_idx_new + [0, 255]))
+            label_list = list(set(self.classes_idx_old + self.classes_idx_new + [0, 255])) 
             target_transform = tv.transforms.Lambda(
                 lambda t: t.apply_(lambda x: x if x in label_list else self.masking_value)
             )

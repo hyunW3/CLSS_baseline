@@ -1,3 +1,4 @@
+import os,sys
 import argparse
 import random
 import collections
@@ -13,7 +14,8 @@ import models.model as module_arch
 import utils.metric as module_metric
 import utils.lr_scheduler as module_lr_scheduler
 import data_loader.data_loaders as module_data
-from trainer.trainer_voc import Trainer_base, Trainer_incremental
+# from trainer.trainer_voc import Trainer_base, Trainer_incremental
+from trainer.trainer import Trainer_base, Trainer_incremental
 from utils.parse_config import ConfigParser
 from logger.logger import Logger
 from utils.memory import memory_sampling_balanced
@@ -44,8 +46,9 @@ def main_worker(gpu, ngpus_per_node, config):
     # Set looging
     rank = dist.get_rank()
     logger = Logger(config.log_dir, rank=rank)
+    logger.set_wandb(config)
     logger.set_logger(f'train(rank{rank})', verbosity=2)
-
+    logger.saveconfig_wandb(config)
     # fix random seeds for reproduce
     SEED = config['seed']
     torch.manual_seed(SEED)
@@ -53,7 +56,13 @@ def main_worker(gpu, ngpus_per_node, config):
     torch.cuda.manual_seed_all(SEED)
     np.random.seed(SEED)
     random.seed(SEED)
-
+    # newly added
+    logger.info(f"SEED: {SEED}, determinisitc {config['set_deterministic']}")
+    if config['set_deterministic'] is True:
+        logger.info('** Set deterministic **')
+        os.environ["PYTHONHASHSEED"] = str(SEED)
+        torch.backends.cudnn.deterministic = True  
+        torch.backends.cudnn.benchmark = True  
     # Task information
     task_step = config['data_loader']['args']['task']['step']
     task_name = config['data_loader']['args']['task']['name']
@@ -64,7 +73,8 @@ def main_worker(gpu, ngpus_per_node, config):
 
     # Create old Model
     if task_step > 0:
-        model_old = config.init_obj('arch', module_arch, **{"classes": dataset.get_per_task_classes(task_step - 1)})
+        model_old = config.init_obj('arch', module_arch, **{"method" : config['method'], \
+                                                            "classes": dataset.get_per_task_classes(task_step - 1)})
         if config['multiprocessing_distributed'] and (config['arch']['args']['norm_act'] == 'bn_sync'):
             model_old = nn.SyncBatchNorm.convert_sync_batchnorm(model_old)
     else:
@@ -97,9 +107,10 @@ def main_worker(gpu, ngpus_per_node, config):
     logger.info(f"New Classes: {new_classes}")
 
     # Create Model
-    model = config.init_obj('arch', module_arch, **{"classes": dataset.get_per_task_classes()})
+    model = config.init_obj('arch', module_arch, **{"method" : config['method'], \
+                                                    "classes": dataset.get_per_task_classes()})
     model._set_bn_momentum(model.backbone, momentum=0.01)
-
+    logger.watch_wandb(model)
     # Convert BN to SyncBN for DDP
     if config['multiprocessing_distributed'] and (config['arch']['args']['norm_act'] == 'bn_sync'):
         model = nn.SyncBatchNorm.convert_sync_batchnorm(model)
@@ -115,33 +126,46 @@ def main_worker(gpu, ngpus_per_node, config):
         if model_old is not None:
             model_old._load_pretrained_model(f'{old_path}')
             
-        if config['hyperparameter']['ac'] > 0:
+        if config['method'] == 'DKD' and config['hyperparameter']['ac'] > 0:
             logger.info('** Proposed Initialization Technique using an Auxiliary Classifier**')
+            model.init_novel_classifier()
+        elif config['method'] == 'MiB':
+            logger.info('** Proposed Initialization Technique using background classifier*')
             model.init_novel_classifier()
         else:
             logger.info('** Random Initialization **')
+        logger.watch_wandb(model_old)
     else:
         logger.info('Train from scratch')
 
     # Build optimizer
     if task_step > 0:
+        # if config['method'] == 'DKD'
         optimizer = config.init_obj(
             'optimizer',
             torch.optim,
             [{"params": model.get_backbone_params(), "weight_decay": 0},
-             {"params": model.get_aspp_params(), "lr": config["optimizer"]["args"]["lr"] * 10, "weight_decay": 0},
-             {"params": model.get_old_classifer_params(), "lr": config["optimizer"]["args"]["lr"] * 10, "weight_decay": 0},
-             {"params": model.get_new_classifer_params(), "lr": config["optimizer"]["args"]["lr"] * 10}]
+             {"params": model.get_aspp_params(), "weight_decay": 0},
+             {"params": model.get_old_classifer_params(), "weight_decay": 0},
+             {"params": model.get_new_classifer_params()}]
         )
-    else:
+        if config['method'] == 'DKD' or config['trainer']['boost_lr'] is True:
+            optimizer.param_groups[1]['lr'] = config["optimizer"]["args"]["lr"] * 10
+            optimizer.param_groups[2]['lr'] = config["optimizer"]["args"]["lr"] * 10
+            optimizer.param_groups[3]['lr'] = config["optimizer"]["args"]["lr"] * 10
+    else: # step 0
         optimizer = config.init_obj(
             'optimizer',
             torch.optim,
             [{"params": model.get_backbone_params()},
-             {"params": model.get_aspp_params(), "lr": config["optimizer"]["args"]["lr"] * 10},
-             {"params": model.get_classifer_params(), "lr": config["optimizer"]["args"]["lr"] * 10}]
+             {"params": model.get_aspp_params()},
+             {"params": model.get_classifer_params()}]
         )
-
+        if config['method'] == 'DKD' or config['trainer']['boost_lr'] is True:
+            optimizer.param_groups[1]['lr'] = config["optimizer"]["args"]["lr"] * 10
+            optimizer.param_groups[2]['lr'] = config["optimizer"]["args"]["lr"] * 10
+    logger.info(optimizer)
+    
     lr_scheduler = config.init_obj(
         'lr_scheduler',
         module_lr_scheduler,
@@ -154,8 +178,8 @@ def main_worker(gpu, ngpus_per_node, config):
         *[dataset.n_classes + 1, [0], new_classes]
     )
 
-    old_classes, _ = dataset.get_task_labels(step=0)
-    new_classes = []
+    old_classes, _ = dataset.get_task_labels(step=0) # 5 (1,2,3,4,5)
+    new_classes = [] # setp1 추가되는 친구들 들어감. 
     # new classes : step 1 ~ task_step
     for i in range(1, task_step + 1):
         c, _ = dataset.get_task_labels(step=i)
@@ -207,7 +231,8 @@ if __name__ == '__main__':
     options = [
         CustomArgs(['--multiprocessing_distributed'], action='store_true', target='multiprocessing_distributed'),
         CustomArgs(['--dist_url'], type=str, target='dist_url'),
-
+        CustomArgs(['--set_deterministic'], action='store_true', target='set_deterministic'),
+        CustomArgs(['--boost_lr'], action='store_true', target='trainer;boost_lr'),
         CustomArgs(['--name'], type=str, target='name'),
         CustomArgs(['--save_dir'], type=str, target='trainer;save_dir'),
 
@@ -216,6 +241,7 @@ if __name__ == '__main__':
         CustomArgs(['--seed'], type=int, target='seed'),
         CustomArgs(['--ep', '--epochs'], type=int, target='trainer;epochs'),
         CustomArgs(['--lr', '--learning_rate'], type=float, target='optimizer;args;lr'),
+
         CustomArgs(['--bs', '--batch_size'], type=int, target='data_loader;args;train;batch_size'),
 
         CustomArgs(['--task_name'], type=str, target='data_loader;args;task;name'),
@@ -228,9 +254,10 @@ if __name__ == '__main__':
         CustomArgs(['--dkd_pos'], type=float, target='hyperparameter;dkd_pos'),
         CustomArgs(['--dkd_neg'], type=float, target='hyperparameter;dkd_neg'),
         CustomArgs(['--ac'], type=float, target='hyperparameter;ac'),
-
         CustomArgs(['--freeze_bn'], action='store_true', target='arch;args;freeze_all_bn'),
         CustomArgs(['--test'], action='store_true', target='test'),
     ]
     config = ConfigParser.from_args(args, options)
+    assert config['method'] in ['DKD', 'MiB'], "Only DKD and MiB are supported"
+    assert config['method'] in config['name'], f"Name should contain the method name, {config['method']} in {config['name']}"
     main(config)

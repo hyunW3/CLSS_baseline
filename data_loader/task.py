@@ -1,3 +1,15 @@
+# tasks_voc_MiB = {
+#     "15-1": {
+#         0: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15],
+#         1: [16],
+#         2: [17],
+#         3: [18],
+#         4: [19],
+#         5: [20]
+#     }
+# }
+
+# tasks_voc_DKD = {
 tasks_voc = {
     "joint": {
         0: list(range(1, 21)),
@@ -176,6 +188,7 @@ tasks_ade = {
 }
 
 
+# def get_task_labels(dataset, name, step, method):
 def get_task_labels(dataset, name, step):
     if dataset == 'voc':
         task_dict = tasks_voc[name]
