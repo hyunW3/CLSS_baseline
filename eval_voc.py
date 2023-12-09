@@ -44,7 +44,9 @@ def main_worker(gpu, ngpus_per_node, config):
     # Set looging
     rank = dist.get_rank()
     logger = Logger(config.log_dir, rank=rank)
-    logger.set_logger(f'train(rank{rank})', verbosity=2)
+    logger.set_wandb(config)
+    logger.set_logger(f'eval(rank{rank})', verbosity=2)
+    logger.saveconfig_wandb(config)
 
     # fix random seeds for reproduce
     SEED = config['seed']

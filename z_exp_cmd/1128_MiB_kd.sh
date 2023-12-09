@@ -18,5 +18,8 @@ cd ../z_exp_individual_cmd
 # ./train_voc_15-1_DKDwMemory.sh
 
 # 1124 reproducity
-./train_voc_15-1_MiB.sh --boost_lr --set_deterministic
-./train_voc_15-1_MiB.sh --boost_lr --set_deterministic
+./train_voc_15-1_MiB_unkd0.sh --kd 0
+./train_voc_15-1_MiB_unkd0.sh --kd 1 --set_deterministic 
+./train_voc_15-1_MiB_unkd0.sh --kd 5 --set_deterministic 
+./train_voc_15-1_MiB_unkd0.sh --kd 2 --set_deterministic 
+./train_voc_15-1_MiB_unkd0.sh --kd 0.1 --set_deterministic 

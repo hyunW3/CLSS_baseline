@@ -62,7 +62,7 @@ def main_worker(gpu, ngpus_per_node, config):
         logger.info('** Set deterministic **')
         os.environ["PYTHONHASHSEED"] = str(SEED)
         torch.backends.cudnn.deterministic = True  
-        torch.backends.cudnn.benchmark = True  
+        torch.backends.cudnn.benchmark = False  
     # Task information
     task_step = config['data_loader']['args']['task']['step']
     task_name = config['data_loader']['args']['task']['name']
