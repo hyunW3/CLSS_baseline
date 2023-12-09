@@ -61,6 +61,33 @@ def loss_MiB(logit, label, n_old_classes, n_new_classes,
         loss_KD = KDLoss_func(logit,logit_old).mean()#dim=[0, 2, 3])
     return loss_CE, loss_KD
 
+def loss_PLOP(logit, label, n_old_classes, n_new_classes,
+              CE_Loss_func, PodLoss_func=None, features=None, features_old=None):
+    if PodLoss_func is None:
+        assert features is None and features_old is None, \
+            "PodLoss_func is None but features or features_old is not None"
+    # TODO the below code is implemented via Copliot, please check.
+    if features is None and PodLoss_func is None:
+        # step 0 loss
+        loss_ce = CE_Loss_func(
+                    logit[:, -n_new_classes:],  # [N, |Ct|, H, W]
+                    label,                # [N, H, W]
+                ).mean(dim=[0, 2, 3])
+        loss_pod = 0
+    else:
+        # step 1 ~ loss
+        # [|Ct|]
+        loss_ce = CE_Loss_func(
+                    logit[:, -n_new_classes:],  # [N, |Ct|, H, W]
+                    label,                # [N, H, W]
+                ).mean(dim=[0, 2, 3])
+        # [|C0:t-1|]
+        loss_pod = PodLoss_func(
+            features['pos_reg'][:, :n_old_classes],
+            features_old['pos_reg'].sigmoid()
+        ).mean(dim=[0, 2, 3])
+
+    return loss_ce, loss_pod
 if __name__ == "__main__":
     load = True
     save = not load

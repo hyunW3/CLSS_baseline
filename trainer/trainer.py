@@ -6,7 +6,7 @@ import torch.nn.parallel
 from torch.nn.parallel import DistributedDataParallel as DDP
 from base import BaseTrainer
 from utils import MetricTracker, MetricTracker_scalars
-from models.loss import WBCELoss, KDLoss, ACLoss, UnbiasedCrossEntropy, UnbiasedKnowledgeDistillationLoss
+from models.loss import WBCELoss, KDLoss, ACLoss, UnbiasedCrossEntropy, UnbiasedKnowledgeDistillationLoss, features_distillation
 from data_loader import VOC
 from data_loader import ADE
 from models.loss_method import loss_DKD, loss_MiB
@@ -98,6 +98,8 @@ class Trainer_base(BaseTrainer):
             self.ACLoss = ACLoss()
         elif self.config['method'] == 'MiB' :
             self.CEloss = UnbiasedCrossEntropy(old_cl=self.n_old_classes, ignore_index=255, reduction='none')
+        elif self.config['method'] == 'PLOP':
+            self.CEloss = nn.CrossEntropyLoss(ignore_index=255)
         else :
             raise NotImplementedError(self.config['method'])
 
@@ -108,7 +110,9 @@ class Trainer_base(BaseTrainer):
             self.logger.info(f"pos_weight - {self.config['hyperparameter']['pos_weight']}")
             self.logger.info(f"Total loss = {self.config['hyperparameter']['mbce']} * L_mbce + {self.config['hyperparameter']['ac']} * L_ac")
         elif self.config['method'] == 'MiB' :
-            self.logger.info(f"Total loss = L_UnCE + {self.config['hyperparameter']['kd']} * L_UnKD (alpha : {self.config['hyperparameter']['alpha']})")
+            self.logger.info(f"Total loss = L_UnCE + {self.config['hyperparameter']['kd']}")
+        elif self.config['method'] == 'PLOP':
+            self.logger.info(f"Total loss = L_CE")
         else :
             raise NotImplementedError(self.config['method'])
     def _train_epoch(self, epoch):
@@ -146,6 +150,8 @@ class Trainer_base(BaseTrainer):
                     loss_CE, _ = loss_MiB(logit, data['label'], self.n_old_classes, self.n_new_classes,
                                             self.CEloss)
                     loss = loss_CE
+                elif self.config['method'] == 'PLOP':
+                    loss = self.CEloss(logit, data['label'])
             self.scaler.scale(loss).backward()
             self.scaler.step(self.optimizer)
             self.scaler.update()
@@ -384,6 +390,10 @@ class Trainer_incremental(Trainer_base):
             self.loss_name = ['loss', 'loss_mbce', 'loss_kd', 'loss_ac', 'loss_dkd_pos', 'loss_dkd_neg']
         elif self.config['method'] == 'MiB':
             self.loss_name = ['loss', 'loss_CE', 'loss_KD']
+        elif self.config['method'] == 'PLOP':
+            self.loss_name = ['loss', 'loss_CE', 'loss_POD']
+        else :
+            raise NotImplementedError(self.config['method'])
         self.train_metrics = MetricTracker(
             keys=self.loss_name,
             writer=self.writer, colums=['total', 'counts', 'average'],
@@ -395,10 +405,12 @@ class Trainer_incremental(Trainer_base):
             self.KDLoss = KDLoss(pos_weight=None, reduction='none')
         elif self.config['method'] == 'MiB' :
             self.KDLoss = UnbiasedKnowledgeDistillationLoss(alpha=self.config['hyperparameter']['alpha'])
+        elif self.config['method'] == 'PLOP':
+            self.PodLoss = features_distillation
         else :
             raise NotImplementedError(self.config['method'])
 
-    def _print_train_info(self):
+    def _print_train_info(self):        
         if self.config['method'] == 'DKD':
             self.logger.info(f"pos_weight - {self.config['hyperparameter']['pos_weight']}")
             self.logger.info(f"Total loss = {self.config['hyperparameter']['mbce']} * L_mbce + {self.config['hyperparameter']['kd']} * L_kd "
@@ -406,6 +418,8 @@ class Trainer_incremental(Trainer_base):
                             f"+ {self.config['hyperparameter']['ac']} * L_ac")
         elif self.config['method'] == 'MiB' :
             self.logger.info(f"Total loss = L_UnCE + {self.config['hyperparameter']['kd']} * L_UnKD (alpha : {self.config['hyperparameter']['alpha']})")
+        elif self.config['method'] == 'PLOP':
+            self.logger.info(f"Total loss = L_CE + POD_loss")
         else :
             raise NotImplementedError(self.config['method'])
     def _train_epoch(self, epoch):
@@ -455,6 +469,10 @@ class Trainer_incremental(Trainer_base):
                                                 self.CEloss,self.KDLoss, logit_old)
                     loss_CE, loss_KD = loss_out
                     loss = loss_CE + self.config['hyperparameter']['kd'] * loss_KD
+                elif self.config['method'] == 'PLOP':
+                    loss_out = loss_PLOP(features, features_old, self.n_old_classes, self.n_new_classes)
+                    loss_CE, loss_POD = loss_out
+                    loss = loss_CE + self.config['hyperparameter']['pod'] * loss_POD
                 else :
                     raise NotImplementedError(self.config['method'])
                 labels = data['label'].type(torch.long)

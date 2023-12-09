@@ -258,6 +258,6 @@ if __name__ == '__main__':
         CustomArgs(['--test'], action='store_true', target='test'),
     ]
     config = ConfigParser.from_args(args, options)
-    assert config['method'] in ['DKD', 'MiB'], "Only DKD and MiB are supported"
+    assert config['method'] in ['DKD', 'MiB','PLOP'], "Only DKD and MiB are supported"
     assert config['method'] in config['name'], f"Name should contain the method name, {config['method']} in {config['name']}"
     main(config)
