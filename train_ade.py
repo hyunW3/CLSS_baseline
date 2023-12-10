@@ -195,6 +195,9 @@ def main_worker(gpu, ngpus_per_node, config):
     logger.print(f"{torch.randint(0, 100, (1, 1))}")
     torch.distributed.barrier()
 
+    # step > 1
+    if task_step > 0:
+        trainer._before_train() # PLOP median value 
     trainer.train()
     trainer.test()
 

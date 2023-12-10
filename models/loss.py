@@ -196,7 +196,7 @@ def features_distillation(
     pod_options={"switch": {"after": {"extra_channels": "sum", "factor": 0.0005, "type": "local"}}}, 
     outputs_old=None,
     use_pod_schedule=True,
-    nb_current_classes=-1,
+    nb_current_classes=-1, # bg + old + new
     nb_new_classes=-1
 ):
     """A mega-function comprising several features-based distillation.
@@ -304,87 +304,18 @@ def features_distillation(
         if prepro == "pow":
             a = torch.pow(a, 2)
             b = torch.pow(b, 2)
-        elif prepro == "none":
-            pass
-        elif prepro == "abs":
-            a = torch.abs(a, 2)
-            b = torch.abs(b, 2)
-        elif prepro == "relu":
-            a = torch.clamp(a, min=0.)
-            b = torch.clamp(b, min=0.)
+        else:
+            raise NotImplementedError(f"Unknown prepro={prepro}")
 
-        if collapse_channels == "spatial":
-            a_h = a.sum(dim=3).view(a.shape[0], -1)
-            b_h = b.sum(dim=3).view(b.shape[0], -1)
-            a_w = a.sum(dim=2).view(a.shape[0], -1)
-            b_w = b.sum(dim=2).view(b.shape[0], -1)
-            a = torch.cat([a_h, a_w], dim=-1)
-            b = torch.cat([b_h, b_w], dim=-1)
-        elif collapse_channels == "global":
-            a = _global_pod(a, spp_scales, normalize=False)
-            b = _global_pod(b, spp_scales, normalize=False)
-        elif collapse_channels == "local":
-            if pod_deeplab_mask and (
-                (i == len(list_attentions_a) - 1 and mask_position == "last") or
-                mask_position == "all"
-            ):
-                if pod_deeplab_mask_factor == 0.:
-                    continue
-
-                pod_factor = pod_deeplab_mask_factor
-
-                if apply_mask == "background":
-                    mask = labels < index_new_class
-                elif apply_mask == "old":
-                    pseudo_labels = labels.clone()
-                    mask_background = labels == 0
-                    pseudo_labels[mask_background] = outputs_old.argmax(dim=1)[mask_background]
-
-                    mask = (labels < index_new_class) & (0 < pseudo_labels)
-                else:
-                    raise NotImplementedError(f"Unknown apply_mask={apply_mask}.")
-
-                if deeplabmask_upscale:
-                    a = F.interpolate(
-                        torch.topk(a, k=upscale_mask_topk, dim=1)[0],
-                        size=labels.shape[-2:],
-                        mode="bilinear",
-                        align_corners=False
-                    )
-                    b = F.interpolate(
-                        torch.topk(b, k=upscale_mask_topk, dim=1)[0],
-                        size=labels.shape[-2:],
-                        mode="bilinear",
-                        align_corners=False
-                    )
-                else:
-                    mask = F.interpolate(mask[:, None].float(), size=a.shape[-2:]).bool()[:, 0]
-
-                if use_adaptative_factor:
-                    adaptative_pod_factor = mask.float().mean(dim=(1, 2))
-
-                a = _local_pod_masked(
-                    a, mask, spp_scales, normalize=False, normalize_per_scale=normalize_per_scale
-                )
-                b = _local_pod_masked(
-                    b, mask, spp_scales, normalize=False, normalize_per_scale=normalize_per_scale
-                )
-            else:
-                a = _local_pod(
-                    a, spp_scales, normalize=False, normalize_per_scale=normalize_per_scale
-                )
-                b = _local_pod(
-                    b, spp_scales, normalize=False, normalize_per_scale=normalize_per_scale
-                )
+        if collapse_channels == "local":
+            a = _local_pod(
+                a, spp_scales, normalize=False, normalize_per_scale=normalize_per_scale
+            )
+            b = _local_pod(
+                b, spp_scales, normalize=False, normalize_per_scale=normalize_per_scale
+            )
         else:
             raise ValueError("Unknown method to collapse: {}".format(collapse_channels))
-
-        if i == len(list_attentions_a) - 1 and pod_options is not None:
-            if "difference_function" in pod_options:
-                difference_function = pod_options["difference_function"]
-        elif pod_options is not None:
-            if "difference_function_all" in pod_options:
-                difference_function = pod_options["difference_function_all"]
 
         if normalize:
             a = F.normalize(a, dim=1, p=2)
@@ -397,28 +328,6 @@ def features_distillation(
                 ).to(device)
             else:
                 layer_loss = torch.frobenius_norm(a - b, dim=-1)
-        elif difference_function == "frobenius_mix":
-            layer_loss_old = torch.frobenius_norm(a[0] - b[0], dim=-1)
-            layer_loss_new = torch.frobenius_norm(a[1] - b[1], dim=-1)
-
-            layer_loss = mix_new_old * layer_loss_old + (1 - mix_new_old) * layer_loss_new
-        elif difference_function == "l1":
-            if isinstance(a, list):
-                layer_loss = torch.tensor(
-                    [torch.norm(aa - bb, p=1, dim=-1) for aa, bb in zip(a, b)]
-                ).to(device)
-            else:
-                layer_loss = torch.norm(a - b, p=1, dim=-1)
-        elif difference_function == "kl":
-            d1, d2, d3 = a.shape
-            a = (a.view(d1 * d2, d3) + 1e-8).log()
-            b = b.view(d1 * d2, d3) + 1e-8
-
-            layer_loss = F.kl_div(a, b, reduction="none").view(d1, d2, d3).sum(dim=(1, 2))
-        elif difference_function == "bce":
-            d1, d2, d3 = a.shape
-            layer_loss = bce(a.view(d1 * d2, d3), b.view(d1 * d2, d3)).view(d1, d2,
-                                                                            d3).mean(dim=(1, 2))
         else:
             raise NotImplementedError(f"Unknown difference_function={difference_function}")
 

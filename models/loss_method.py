@@ -2,7 +2,7 @@ import math
 import torch
 import torch.nn as nn
 from torch.nn import functional as F
-# from .loss import BCELoss, WBCELoss
+from psuedo_labeling import PLOP_pseudo_labeling
 
 def loss_DKD(logit, label, n_old_classes, n_new_classes,
               BCELoss_func, ACLoss_func, 
@@ -61,31 +61,41 @@ def loss_MiB(logit, label, n_old_classes, n_new_classes,
         loss_KD = KDLoss_func(logit,logit_old).mean()#dim=[0, 2, 3])
     return loss_CE, loss_KD
 
-def loss_PLOP(logit, label, n_old_classes, n_new_classes,
-              CE_Loss_func, PodLoss_func=None, features=None, features_old=None):
+def loss_PLOP(logits, labels, classif_adaptive_factor, n_old_classes, n_new_classes,
+              CE_Loss_func, PodLoss_func=None, logits_old=None ,
+              attentions=None, attentions_old=None):
     if PodLoss_func is None:
-        assert features is None and features_old is None, \
-            "PodLoss_func is None but features or features_old is not None"
-    # TODO the below code is implemented via Copliot, please check.
-    if features is None and PodLoss_func is None:
+        assert attentions is None and logits_old is None, \
+            "PodLoss_func is not None or logits_old is not None"
+    
+    if attentions is None and PodLoss_func is None:
         # step 0 loss
         loss_ce = CE_Loss_func(
-                    logit[:, -n_new_classes:],  # [N, |Ct|, H, W]
-                    label,                # [N, H, W]
+                    logits,  # [N, |C0:t-1|], H, W]
+                    labels,                # [N, H, W]
                 ).mean(dim=[0, 2, 3])
         loss_pod = 0
     else:
         # step 1 ~ loss
         # [|Ct|]
         loss_ce = CE_Loss_func(
-                    logit[:, -n_new_classes:],  # [N, |Ct|, H, W]
-                    label,                # [N, H, W]
-                ).mean(dim=[0, 2, 3])
+                    logits,  # [N, |C0:t-1|], H, W]
+                    labels,                # [N, H, W]
+                ) # B,H,W
+        loss_ce = (classif_adaptive_factor * loss_ce).mean(dim=[0, 2, 3]) 
+        print(f"loss_ce : {loss_ce}, {loss_ce.shape}")
         # [|C0:t-1|]
+        # TODO : need to check
+        n_current_classes = n_old_classes + n_new_classes # the number of current classes (old + new)
         loss_pod = PodLoss_func(
-            features['pos_reg'][:, :n_old_classes],
-            features_old['pos_reg'].sigmoid()
-        ).mean(dim=[0, 2, 3])
+            attentions,
+            attentions_old,
+            index = label,
+            index_new_class=n_old_classes+1, # ? # 15-1 step1 => 16
+            outputs_old=logits_old,
+            nb_current_classes=n_current_classes,
+            nb_new_classes = n_new_classes
+        )
 
     return loss_ce, loss_pod
 if __name__ == "__main__":

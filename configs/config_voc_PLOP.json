@@ -73,8 +73,6 @@
         }
     },
     "hyperparameter": {
-        "alpha" : 1.0,
-        "kd" : 10.0
     },
     "lr_scheduler": {
         "type": "PolyLR",

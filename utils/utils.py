@@ -6,7 +6,23 @@ from collections import OrderedDict
 from torchvision.transforms.functional import normalize
 import torch.nn as nn
 import numpy as np
+import torch
+import math 
 
+# PLOP
+def entropy(probabilities):
+    """Computes the entropy per pixel.
+
+    # References:
+        * ESL: Entropy-guided Self-supervised Learning for Domain Adaptation in Semantic Segmentation
+          Saporta et al.
+          CVPR Workshop 2020
+
+    :param probabilities: Tensor of shape (b, c, w, h).
+    :return: One entropy per pixel, shape (b, w, h)
+    """
+    factor = 1 / math.log(probabilities.shape[1] + 1e-8)
+    return -factor * torch.mean(probabilities * torch.log(probabilities + 1e-8), dim=1)
 
 def ensure_dir(dirname):
     dirname = Path(dirname)
