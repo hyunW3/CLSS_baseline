@@ -63,7 +63,7 @@
             "0.001",
             "--bs",
             "6",
-        "--epochs", "60"],
+            "--epochs", "60"],
             "console": "integratedTerminal",
             "justMyCode": true
         },
@@ -161,11 +161,20 @@
             "justMyCode": true
         },
         {
+            "name": "TEST:voc15-1",
+            "type": "python",
+            "request": "launch",
+            "program" : "eval_ade.py",
+            "args" : ["-d","0", "-r", "./saved_voc/models/overlap_15-1_DKD/step_5/checkpoint-epoch60.pth"],
+            "console": "integratedTerminal",
+            "justMyCode": true
+        },
+        {
             "name": "TEST:ade50-50",
             "type": "python",
             "request": "launch",
             "program" : "eval_ade.py",
-            "args" : ["-d","0","--test", "-r", "./saved_ade/models/overlap_50-50_DKD/step_2/checkpoint-epoch100.pth"],
+            "args" : ["-d","0", "-r", "./saved_ade/models/overlap_50-50_DKD/step_2/checkpoint-epoch100.pth"],
             "console": "integratedTerminal",
             "justMyCode": true
         },
