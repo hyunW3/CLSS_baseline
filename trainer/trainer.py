@@ -105,7 +105,7 @@ class Trainer_base(BaseTrainer):
         elif self.config['method'] == 'MiB' :
             self.CEloss = UnbiasedCrossEntropy(old_cl=self.n_old_classes, ignore_index=255, reduction='none')
         elif self.config['method'] == 'PLOP':
-            self.CEloss = nn.CrossEntropyLoss(ignore_index=255)
+            self.CEloss = nn.CrossEntropyLoss(ignore_index=255,reduction='none')
         else :
             raise NotImplementedError(self.config['method'])
 
@@ -149,15 +149,20 @@ class Trainer_base(BaseTrainer):
             with torch.cuda.amp.autocast(enabled=self.config['use_amp']):
                 logit, features = self.model(data['image'], ret_intermediate=False)
                 if self.config['method'] == 'DKD':    
-                    loss_mbce, _, loss_ac, _, _ = loss_DKD(logit, data['label'], self.n_old_classes, self.n_new_classes,\
+                    loss_mbce, _, loss_ac, _, _ = loss_DKD(logit, data['label'], 
+                                                           self.n_old_classes, self.n_new_classes,\
                                                             self.BCELoss, self.ACLoss)
                     loss = self.config['hyperparameter']['mbce'] * loss_mbce.sum() + self.config['hyperparameter']['ac'] * loss_ac.sum()
                 elif self.config['method'] == 'MiB':
-                    loss_CE, _ = loss_MiB(logit, data['label'], self.n_old_classes, self.n_new_classes,
+                    loss_CE, _ = loss_MiB(logit, data['label'], 
+                                          self.n_old_classes, self.n_new_classes,
                                             self.CEloss)
                     loss = loss_CE
                 elif self.config['method'] == 'PLOP':
-                    loss = self.CEloss(logit, data['label'])
+                    loss_CE, _ = loss_PLOP(logit, data['label'],
+                                     self.n_old_classes, self.n_new_classes, 
+                                     self.CEloss)
+                    loss = loss_CE
                 else:
                     raise NotImplementedError(self.config['method'])
             self.scaler.scale(loss).backward()
@@ -171,7 +176,7 @@ class Trainer_base(BaseTrainer):
             if self.config['method'] == 'DKD':   
                 self.train_metrics.update('loss_mbce', loss_mbce.mean().item())
                 self.train_metrics.update('loss_ac', loss_ac.mean().item())
-            elif self.config['method'] == 'MiB':
+            elif self.config['method'] == 'MiB' or self.config['method'] == 'PLOP':
                 self.train_metrics.update('loss_CE', loss_CE.mean().item())
             else :
                 raise NotImplementedError(self.config['method'])
@@ -220,10 +225,8 @@ class Trainer_base(BaseTrainer):
                     idx = (logit[:, 1:] > 0.5).float()  # logit: [N, C, H, W]
                     idx = idx.sum(dim=1)  # logit: [N, H, W]
                     pred[idx == 0] = 0  # set background (non-target class)
-                elif self.config['method'] == 'MiB':
+                elif self.config['method'] == 'MiB' or self.config['method'] == 'PLOP':
                     _, pred = logit.max(dim=1)
-                elif self.config['method'] == 'PLOP':
-                    raise NotImplementedError("need to implement PLOP")
                 else :
                     raise NotImplementedError(self.config['method'])
                 pred = pred.cpu().numpy()
@@ -312,9 +315,7 @@ class Trainer_base(BaseTrainer):
 
                     pred[idx == 0] = 0  # set background (non-target class)
                 # elif 'MIB' or 'PLOP'
-                elif self.config['method'] == 'MiB':
-                    _, pred = logit.max(dim=1)
-                elif self.config['method'] == 'PLOP':
+                elif self.config['method'] == 'MiB' or self.config['method'] == 'PLOP':
                     _, pred = logit.max(dim=1)
                 else:
                     raise NotImplementedError(self.config['method'])
@@ -532,8 +533,11 @@ class Trainer_incremental(Trainer_base):
                     # if self.pod_logits: True
                     attentions_old.append(features_old["sem_logits_small"])
                     attentions.append(features["sem_logits_small"])
-                    loss_out = loss_PLOP(logit, labels,classif_adaptive_factor, self.n_old_classes, self.n_new_classes, 
-                                         self.CEloss, self.PodLoss, logit_old, attentions, attentions_old)
+                    loss_out = loss_PLOP(logit, labels,
+                                         self.n_old_classes, self.n_new_classes, 
+                                         self.CEloss, self.PodLoss, logit_old, 
+                                         attentions, attentions_old,
+                                         classif_adaptive_factor)
                     loss_CE, loss_POD = loss_out
                     loss = loss_CE + loss_POD
                     
@@ -571,6 +575,11 @@ class Trainer_incremental(Trainer_base):
             elif self.config['method'] == 'MiB':
                 self.train_metrics.update('loss_CE', loss_CE.mean().item())
                 self.train_metrics.update('loss_KD', loss_KD.mean().item())
+            elif self.config['method'] == 'PLOP':
+                self.train_metrics.update('loss_CE', loss_CE.mean().item())
+                self.train_metrics.update('loss_POD', loss_POD.mean().item())
+            else :
+                raise NotImplementedError(self.config['method'])
             # Get First lr
             if batch_idx == 0:
                 self.writer.add_scalars('lr', {'lr': self.optimizer.param_groups[0]['lr']}, epoch - 1)

@@ -61,19 +61,19 @@ def loss_MiB(logit, label, n_old_classes, n_new_classes,
         loss_KD = KDLoss_func(logit,logit_old).mean()#dim=[0, 2, 3])
     return loss_CE, loss_KD
 
-def loss_PLOP(logits, labels, classif_adaptive_factor, n_old_classes, n_new_classes,
+def loss_PLOP(logits, labels, n_old_classes, n_new_classes,
               CE_Loss_func, PodLoss_func=None, logits_old=None ,
-              attentions=None, attentions_old=None):
+              attentions=None, attentions_old=None,classif_adaptive_factor=None):
     if PodLoss_func is None:
         assert attentions is None and logits_old is None, \
             "PodLoss_func is not None or logits_old is not None"
-    
+    labels = labels.long()
     if attentions is None and PodLoss_func is None:
         # step 0 loss
         loss_ce = CE_Loss_func(
                     logits,  # [N, |C0:t-1|], H, W]
                     labels,                # [N, H, W]
-                ).mean(dim=[0, 2, 3])
+                ).mean() 
         loss_pod = 0
     else:
         # step 1 ~ loss
@@ -82,7 +82,7 @@ def loss_PLOP(logits, labels, classif_adaptive_factor, n_old_classes, n_new_clas
                     logits,  # [N, |C0:t-1|], H, W]
                     labels,                # [N, H, W]
                 ) # B,H,W
-        loss_ce = (classif_adaptive_factor * loss_ce).mean(dim=[0, 2, 3]) 
+        loss_ce = (classif_adaptive_factor * loss_ce).mean() 
         print(f"loss_ce : {loss_ce}, {loss_ce.shape}")
         # [|C0:t-1|]
         # TODO : need to check
