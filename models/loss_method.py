@@ -2,7 +2,7 @@ import math
 import torch
 import torch.nn as nn
 from torch.nn import functional as F
-from psuedo_labeling import PLOP_pseudo_labeling
+# from psuedo_labeling import PLOP_pseudo_labeling
 
 def loss_DKD(logit, label, n_old_classes, n_new_classes,
               BCELoss_func, ACLoss_func, 

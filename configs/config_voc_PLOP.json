@@ -72,8 +72,6 @@
             "nesterov": true
         }
     },
-    "hyperparameter": {
-    },
     "lr_scheduler": {
         "type": "PolyLR",
         "args": {}

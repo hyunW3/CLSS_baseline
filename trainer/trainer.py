@@ -389,7 +389,7 @@ class Trainer_incremental(Trainer_base):
         super().__init__(
             model=model, optimizer=optimizer, evaluator=evaluator, config=config, task_info=task_info,
             data_loader=data_loader, lr_scheduler=lr_scheduler, logger=logger, gpu=gpu)
-
+        self.threshold = 0.001 #entropy threshold
         if config['multiprocessing_distributed']:
             if gpu is not None:
                 if model_old is not None:
@@ -529,9 +529,9 @@ class Trainer_incremental(Trainer_base):
                     # features has key? -  dict_keys(['body', 'pre_logits', 'attentions', 'sem_logits_small'])
                     attentions_old = features_old["attentions"]
                     attentions = features["attentions"]
-                    if self.pod_logits:
-                        attentions_old.append(features_old["sem_logits_small"])
-                        attentions.append(features["sem_logits_small"])
+                    # if self.pod_logits: True
+                    attentions_old.append(features_old["sem_logits_small"])
+                    attentions.append(features["sem_logits_small"])
                     loss_out = loss_PLOP(logit, labels,classif_adaptive_factor, self.n_old_classes, self.n_new_classes, 
                                          self.CEloss, self.PodLoss, logit_old, attentions, attentions_old)
                     loss_CE, loss_POD = loss_out

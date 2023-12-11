@@ -22,7 +22,7 @@ from PIL import Image
 from torch.nn.parallel import DistributedDataParallel as DDP
 
 from data_loader.task import get_task_labels, get_per_task_classes
-from trainer.trainer_voc import Trainer_base, Trainer_incremental
+from trainer.trainer import Trainer_base, Trainer_incremental
 
 
 def _prepare_device(n_gpu_use, logger):
