@@ -118,22 +118,21 @@ class DeepLabV3(nn.Module):
                 nn.init.constant_(m.bias, 0)
 
     def init_novel_classifier(self):
+        cls = self.cls[-1]  # New class classifier
         if self.method == 'DKD':
             # Initialize novel classifiers using an auxiliary classifier
-            cls = self.cls[-1]  # New class classifier
             for i in range(self.classes[-1]):
                 cls.weight[i:i + 1].data.copy_(self.cls[0].weight)
                 cls.bias[i:i + 1].data.copy_(self.cls[0].bias)
-        elif self.method == 'MiB':
+        elif self.method == 'MiB' or self.method == 'PLOP':
             # Initialize novel classifiers using a background classifier
-            cls = self.cls[-1]  # New class classifier  
             # As MiB code implemented
             bias_diff = torch.log(torch.FloatTensor([self.classes[-1]+1]))
             new_bias = self.cls[0].bias.data - bias_diff
             for i in range(self.classes[-1]):
                 cls.weight[i:i+1].data.copy_(self.cls[0].weight)
                 cls.bias[i:i+1].data.copy_(new_bias)    
-            # self.cls[0].bias.data.copy_(new_bias)  # it ruins mIoU_new?
+            # set the bias of background classifier same weight as the last class
             self.cls[0].bias[0].data.copy_(new_bias.squeeze(0))
             print("Bg classifier bias[0] updated")
             # print("No bg classifier updated")
