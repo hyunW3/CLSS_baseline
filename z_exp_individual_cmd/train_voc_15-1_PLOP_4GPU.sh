@@ -4,12 +4,13 @@ START_DATE=$(date '+%Y-%m-%d')
 
 PORT=$((9000 + RANDOM % 1000))
 PORT='tcp://127.0.0.1:'$PORT
-GPU=0,1
-BS=8  # Total 24
+GPU=0,1,2,3
+BS=6  # Total 24
 SAVEDIR='saved_voc'
 
 TASKSETTING='overlap'  # or 'disjoint'
 TASKNAME='15-1'
+# PLOP 30 epoch
 EPOCH=30
 INIT_LR=0.01
 LR=0.001
@@ -53,11 +54,9 @@ fi
 # fi
 
 
-# alert_knock python train_voc.py -c configs/config_voc_PLOP.json \
-# -d ${GPU} --multiprocessing_distributed --dist_url ${PORT} --save_dir ${SAVEDIR} --name ${NAME} ${OPTION} \
-# --task_name ${TASKNAME} --task_setting ${TASKSETTING} --task_step 0 --lr ${INIT_LR} --bs ${BS} && 
-rm -r ./saved_voc/models/overlap_15-1_PLOP_non_deterministic/step_1
-rm -r ./saved_voc/log/overlap_15-1_PLOP_non_deterministic/step_1
+alert_knock python train_voc.py -c configs/config_voc_PLOP.json \
+-d ${GPU} --multiprocessing_distributed --dist_url ${PORT} --save_dir ${SAVEDIR} --name ${NAME} ${OPTION} \
+--task_name ${TASKNAME} --task_setting ${TASKSETTING} --task_step 0 --lr ${INIT_LR} --bs ${BS} && 
 
 alert_knock python train_voc.py -c configs/config_voc_PLOP.json \
 -d ${GPU} --multiprocessing_distributed --dist_url ${PORT} --save_dir ${SAVEDIR} --name ${NAME} ${OPTION} \
@@ -82,4 +81,4 @@ python train_voc.py -c configs/config_voc_PLOP.json \
 python eval_voc.py -d 0 \
     -r ${SAVEDIR}/models/${TASKSETTING}_${TASKNAME}_${NAME}/step_5/checkpoint-epoch${EPOCH}.pth 
 
-alert_knock echo "PLOP in DKD finished."
+# alert_knock echo "PLOP in DKD finished."

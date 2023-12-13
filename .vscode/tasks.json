@@ -27,6 +27,12 @@
             "command" : 
             "rm -r /home/hyunwoong/CLSS/baseline/DKD/saved_voc/models/overlap_15-1_MiB_non_deterministic_bias[0]/step_1 /home/hyunwoong/CLSS/baseline/DKD/saved_voc/log/overlap_15-1_MiB_non_deterministic_bias[0]/step_1 || echo not_exist",
             "type" : "shell"
+        },
+        {
+            "label" : "rm_folder_PLOP_step1",
+            "command" :
+            "rm -r ./saved_voc/models/overlap_15-1_PLOP_non_deterministic/step_1 ./saved_voc/log/overlap_15-1_PLOP_non_deterministic/step_1 || echo not_exist",
+            "type" : "shell"
         }
     ]
 }

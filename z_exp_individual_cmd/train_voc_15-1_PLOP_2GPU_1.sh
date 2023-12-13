@@ -4,7 +4,7 @@ START_DATE=$(date '+%Y-%m-%d')
 
 PORT=$((9000 + RANDOM % 1000))
 PORT='tcp://127.0.0.1:'$PORT
-GPU=0,1
+GPU=2,3
 BS=8  # Total 24
 SAVEDIR='saved_voc'
 
@@ -56,8 +56,8 @@ fi
 # alert_knock python train_voc.py -c configs/config_voc_PLOP.json \
 # -d ${GPU} --multiprocessing_distributed --dist_url ${PORT} --save_dir ${SAVEDIR} --name ${NAME} ${OPTION} \
 # --task_name ${TASKNAME} --task_setting ${TASKSETTING} --task_step 0 --lr ${INIT_LR} --bs ${BS} && 
-rm -r ./saved_voc/models/overlap_15-1_PLOP_non_deterministic/step_1
-rm -r ./saved_voc/log/overlap_15-1_PLOP_non_deterministic/step_1
+rm -r ./saved_voc/models/overlap_15-1_PLOP_deterministic/step_1
+rm -r ./saved_voc/log/overlap_15-1_PLOP_deterministic/step_1
 
 alert_knock python train_voc.py -c configs/config_voc_PLOP.json \
 -d ${GPU} --multiprocessing_distributed --dist_url ${PORT} --save_dir ${SAVEDIR} --name ${NAME} ${OPTION} \
