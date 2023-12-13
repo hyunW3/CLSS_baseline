@@ -62,10 +62,23 @@ class DeepLabV3(nn.Module):
         )
 
         if ret_intermediate:
-            sem_neg_logits_small = self.forward_class_prediction_negative(x_pl)
-            sem_pos_logits_small = self.forward_class_prediction_positive(x_pl)
-            
-            return sem_logits, {'neg_reg': sem_neg_logits_small, 'pos_reg': sem_pos_logits_small}
+            if self.method == 'DKD':
+                sem_neg_logits_small = self.forward_class_prediction_negative(x_pl)
+                sem_pos_logits_small = self.forward_class_prediction_positive(x_pl)
+                
+                return sem_logits, {'neg_reg': sem_neg_logits_small, 'pos_reg': sem_pos_logits_small}
+            elif self.method == 'MiB':
+                return sem_logits, {}
+            elif self.method == 'PLOP':
+
+                return sem_logits, {
+                "body": x_b,
+                "pre_logits": x_pl,
+                "attentions": attentions + [x_pl],
+                "sem_logits_small": sem_logits_small
+            }
+            else :
+                raise NotImplementedError(f"Not implemented method, {self.method}")
         else:
             return sem_logits, {}
 
@@ -78,7 +91,12 @@ class DeepLabV3(nn.Module):
         out = []
         for i, mod in enumerate(self.cls):
             if i == 0:
-                out.append(mod(x_pl.detach()))  # [N, c, H, W]
+                if self.method == 'DKD':
+                    # AC is not used
+                    out.append(mod(x_pl.detach()))  # [N, c, H, W]
+                else:
+                    # Background classifier
+                    out.append(mod(x_pl))  # [N, c, H, W]
             else:
                 out.append(mod(x_pl))  # [N, c, H, W]
         x_o = torch.cat(out, dim=1)  # [N, |Ct|, H, W]
