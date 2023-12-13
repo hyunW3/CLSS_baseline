@@ -83,14 +83,14 @@ def loss_PLOP(logits, labels, n_old_classes, n_new_classes,
                     labels,                # [N, H, W]
                 ) # B,H,W
         loss_ce = (classif_adaptive_factor * loss_ce).mean() 
-        print(f"loss_ce : {loss_ce}, {loss_ce.shape}")
+        # print(f"loss_ce : {loss_ce}, {loss_ce.shape}")
         # [|C0:t-1|]
         # TODO : need to check
         n_current_classes = n_old_classes + n_new_classes # the number of current classes (old + new)
         loss_pod = PodLoss_func(
-            attentions,
             attentions_old,
-            index = label,
+            attentions,
+            labels = labels,
             index_new_class=n_old_classes+1, # ? # 15-1 step1 => 16
             outputs_old=logits_old,
             nb_current_classes=n_current_classes,

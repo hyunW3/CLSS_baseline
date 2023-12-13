@@ -179,8 +179,8 @@ class UnbiasedKnowledgeDistillationLoss(nn.Module):
 
 # PLOP
 def features_distillation(
-    list_attentions_a,
-    list_attentions_b,
+    list_attentions_a, # features from model_old
+    list_attentions_b, # features from model
     collapse_channels="local",
     normalize=True,
     labels=None,

@@ -391,6 +391,9 @@ class Trainer_incremental(Trainer_base):
             model=model, optimizer=optimizer, evaluator=evaluator, config=config, task_info=task_info,
             data_loader=data_loader, lr_scheduler=lr_scheduler, logger=logger, gpu=gpu)
         self.threshold = 0.001 #entropy threshold
+        self.pseudo_labeling = 'entropy'
+        self.n_current_classes =  self.n_old_classes + self.n_new_classes
+        self.nb_new_classes = self.n_new_classes
         if config['multiprocessing_distributed']:
             if gpu is not None:
                 if model_old is not None:
@@ -505,7 +508,7 @@ class Trainer_incremental(Trainer_base):
                     ############
                     # psuedo labeling
                     # original_labels = labels.clone()
-                    mask_background = labels < self.old_classes
+                    mask_background = labels < self.n_old_classes
                     # self.pseudo_labeling == "entropy":
                     probs = torch.softmax(logit_old, dim=1)
                     max_probs, pseudo_labels = probs.max(dim=1)
@@ -528,6 +531,7 @@ class Trainer_incremental(Trainer_base):
                     classif_adaptive_factor = classif_adaptive_factor[:, None, None]
 
                     # features has key? -  dict_keys(['body', 'pre_logits', 'attentions', 'sem_logits_small'])
+                    # pos_neg
                     attentions_old = features_old["attentions"]
                     attentions = features["attentions"]
                     # if self.pod_logits: True
@@ -614,17 +618,17 @@ class Trainer_incremental(Trainer_base):
         https://math.stackexchange.com/questions/2591946/how-to-find-median-from-a-histogram
         """
         if mode == "entropy":
-            max_value = torch.log(torch.tensor(self.nb_current_classes).float().to(self.device))
+            max_value = torch.log(torch.tensor(self.n_current_classes).float().to(self.device))
             nb_bins = 100
         else:
             max_value = 1.0
             nb_bins = 20  # Bins of 0.05 on a range [0, 1]
-        if self.pseudo_nb_bins is not None:
-            nb_bins = self.pseudo_nb_bins
 
-        histograms = torch.zeros(self.nb_current_classes, nb_bins).long().to(self.device)
+        histograms = torch.zeros(self.n_current_classes, nb_bins).long().to(self.device)
 
-        for cur_step, (images, labels) in enumerate(self.train_loader):
+        for cur_step, data in enumerate(self.train_loader):
+            images, labels = data['image'], data['label']
+            del data
             images = images.to(self.device, dtype=torch.float32)
             labels = labels.to(self.device, dtype=torch.long)
 
@@ -650,13 +654,14 @@ class Trainer_incremental(Trainer_base):
 
             if cur_step % 10 == 0:
                 self.logger.info(f"Median computing {cur_step}/{len(self.train_loader)}.")
-
-        thresholds = torch.zeros(self.nb_current_classes, dtype=torch.float32).to(
+            import gc
+            gc.collect()
+        thresholds = torch.zeros(self.n_current_classes, dtype=torch.float32).to(
             self.device
         )  # zeros or ones? If old_model never predict a class it may be important
 
         self.logger.info("Approximating median")
-        for c in range(self.nb_current_classes):
+        for c in range(self.n_current_classes):
             total = histograms[c].sum()
             if total <= 0.:
                 continue
@@ -679,8 +684,8 @@ class Trainer_incremental(Trainer_base):
         if "_" in mode:
             mode, base_threshold = mode.split("_")
             base_threshold = float(base_threshold)
-        if self.step_threshold is not None:
-            self.threshold += self.step * self.step_threshold
+        # if self.step_threshold is not None:
+        #     self.threshold += self.step * self.step_threshold
 
         if mode == "entropy":
             for c in range(len(thresholds)):

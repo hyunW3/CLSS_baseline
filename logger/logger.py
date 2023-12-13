@@ -29,7 +29,7 @@ class Logger:
         if self.rank == 0:
             self.wandb = wandb.init(
                 project="[CLSS]_MiB",
-                tags=["baseline", "MiB"],
+                tags=["baseline", config['method']],
             )
             method = f"_{config['name']}" if config['method'] not in  config['name'] else ""
             wandb.run.name = config['data_loader']['args']['task']['setting'] + '_' \
