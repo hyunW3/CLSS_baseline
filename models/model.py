@@ -72,8 +72,6 @@ class DeepLabV3(nn.Module):
             elif self.method == 'PLOP':
 
                 return sem_logits, {
-                "body": x_b,
-                "pre_logits": x_pl,
                 "attentions": attentions + [x_pl],
                 "sem_logits_small": sem_logits_small
             }

@@ -212,9 +212,6 @@ def features_distillation(
 
     assert len(list_attentions_a) == len(list_attentions_b)
 
-    if pod_deeplab_mask_factor is None:
-        pod_deeplab_mask_factor = pod_factor
-
     #if collapse_channels in ("spatial_tuple", "spp", "spp_noNorm", "spatial_noNorm"):
     normalize = False
 
@@ -298,9 +295,6 @@ def features_distillation(
         # shape of (b, n, w, h)
         assert a.shape == b.shape, (a.shape, b.shape)
 
-        if not pod_deeplab_mask and use_adaptative_factor:
-            adaptative_pod_factor = (labels == 0).float().mean()
-
         if prepro == "pow":
             a = torch.pow(a, 2)
             b = torch.pow(b, 2)
@@ -379,65 +373,5 @@ def _local_pod(x, spp_scales=[1, 2, 4], normalize=False, normalize_per_scale=Fal
 
                 emb.append(horizontal_pool)
                 emb.append(vertical_pool)
-
-    return torch.cat(emb, dim=1)
-
-def _local_pod_masked(
-    x, mask, spp_scales=[1, 2, 4], normalize=False, normalize_per_scale=False
-):
-    b = x.shape[0]
-    c = x.shape[1]
-    w = x.shape[-1]
-    emb = []
-
-    mask = mask[:, None].repeat(1, c, 1, 1)
-    x[mask] = 0.
-
-    for scale in spp_scales:
-        k = w // scale
-
-        nb_regions = scale**2
-
-        for i in range(scale):
-            for j in range(scale):
-                tensor = x[..., i * k:(i + 1) * k, j * k:(j + 1) * k]
-
-                horizontal_pool = tensor.mean(dim=3).view(b, -1)
-                vertical_pool = tensor.mean(dim=2).view(b, -1)
-
-                if normalize_per_scale is True:
-                    horizontal_pool = horizontal_pool / nb_regions
-                    vertical_pool = vertical_pool / nb_regions
-                elif normalize_per_scale == "spm":
-                    if scale_index == 0:
-                        factor = 2 ** (len(spp_scales) - 1)
-                    else:
-                        factor = 2 ** (len(spp_scales) - scale_index)
-                if normalize:
-                    horizontal_pool = F.normalize(horizontal_pool, dim=1, p=2)
-                    vertical_pool = F.normalize(vertical_pool, dim=1, p=2)
-
-                emb.append(horizontal_pool)
-                emb.append(vertical_pool)
-
-    return torch.cat(emb, dim=1)
-
-def _global_pod(x, spp_scales=[2, 4, 8], normalize=False):
-    b = x.shape[0]
-    w = x.shape[-1]
-
-    emb = []
-    for scale in spp_scales:
-        tensor = F.avg_pool2d(x, kernel_size=w // scale)
-        horizontal_pool = tensor.sum(dim=2).view(b, -1)
-        vertical_pool = tensor.sum(dim=3).view(b, -1)
-
-        if normalize:
-            horizontal_pool = F.normalize(horizontal_pool, dim=1, p=2)
-            vertical_pool = F.normalize(vertical_pool, dim=1, p=2)
-
-        tensor_pool = torch.cat([horizontal_pool, vertical_pool], dim=-1)
-
-        emb.append(tensor_pool)
 
     return torch.cat(emb, dim=1)
