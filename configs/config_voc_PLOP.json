@@ -1,5 +1,5 @@
 {
-    "name" : "PLOP_test",
+    "name" : "PLOP_non_deterministic",
     "method": "PLOP",
     "world_size": 1,
     "rank" : 0,
@@ -71,10 +71,6 @@
             "momentum": 0.9,
             "nesterov": true
         }
-    },
-    "hyperparameter": {
-        "alpha" : 1.0,
-        "kd" : 10.0
     },
     "lr_scheduler": {
         "type": "PolyLR",

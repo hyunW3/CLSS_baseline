@@ -6,12 +6,14 @@ import torch.nn.parallel
 from torch.nn.parallel import DistributedDataParallel as DDP
 from base import BaseTrainer
 from utils import MetricTracker, MetricTracker_scalars
-from models.loss import WBCELoss, KDLoss, ACLoss, UnbiasedCrossEntropy, UnbiasedKnowledgeDistillationLoss
+from models.loss import WBCELoss, KDLoss, ACLoss, UnbiasedCrossEntropy, UnbiasedKnowledgeDistillationLoss, features_distillation
 from data_loader import VOC
 from data_loader import ADE
-from models.loss_method import loss_DKD, loss_MiB
+from models.loss_method import loss_DKD, loss_MiB, loss_PLOP
 import wandb
 import numpy as np
+from utils import entropy
+
 class Trainer_base(BaseTrainer):
     """
     Trainer class for a base step
@@ -82,6 +84,10 @@ class Trainer_base(BaseTrainer):
             self.loss_name = ['loss', 'loss_mbce', 'loss_ac']
         elif self.config['method'] == 'MiB':
             self.loss_name = ['loss', 'loss_CE', 'loss_KD']
+        elif self.config['method'] == 'PLOP':
+            self.loss_name = ['loss', 'loss_CE', 'loss_POD']
+        else :
+            raise NotImplementedError(self.config['method'])
         self.train_metrics = MetricTracker(
             keys=self.loss_name,
             writer=self.writer,
@@ -98,6 +104,8 @@ class Trainer_base(BaseTrainer):
             self.ACLoss = ACLoss()
         elif self.config['method'] == 'MiB' :
             self.CEloss = UnbiasedCrossEntropy(old_cl=self.n_old_classes, ignore_index=255, reduction='none')
+        elif self.config['method'] == 'PLOP':
+            self.CEloss = nn.CrossEntropyLoss(ignore_index=255,reduction='none')
         else :
             raise NotImplementedError(self.config['method'])
 
@@ -108,7 +116,9 @@ class Trainer_base(BaseTrainer):
             self.logger.info(f"pos_weight - {self.config['hyperparameter']['pos_weight']}")
             self.logger.info(f"Total loss = {self.config['hyperparameter']['mbce']} * L_mbce + {self.config['hyperparameter']['ac']} * L_ac")
         elif self.config['method'] == 'MiB' :
-            self.logger.info(f"Total loss = L_UnCE + {self.config['hyperparameter']['kd']} * L_UnKD (alpha : {self.config['hyperparameter']['alpha']})")
+            self.logger.info(f"Total loss = L_UnCE + {self.config['hyperparameter']['kd']}")
+        elif self.config['method'] == 'PLOP':
+            self.logger.info(f"Total loss = L_CE")
         else :
             raise NotImplementedError(self.config['method'])
     def _train_epoch(self, epoch):
@@ -139,13 +149,22 @@ class Trainer_base(BaseTrainer):
             with torch.cuda.amp.autocast(enabled=self.config['use_amp']):
                 logit, features = self.model(data['image'], ret_intermediate=False)
                 if self.config['method'] == 'DKD':    
-                    loss_mbce, _, loss_ac, _, _ = loss_DKD(logit, data['label'], self.n_old_classes, self.n_new_classes,\
+                    loss_mbce, _, loss_ac, _, _ = loss_DKD(logit, data['label'], 
+                                                           self.n_old_classes, self.n_new_classes,\
                                                             self.BCELoss, self.ACLoss)
                     loss = self.config['hyperparameter']['mbce'] * loss_mbce.sum() + self.config['hyperparameter']['ac'] * loss_ac.sum()
                 elif self.config['method'] == 'MiB':
-                    loss_CE, _ = loss_MiB(logit, data['label'], self.n_old_classes, self.n_new_classes,
+                    loss_CE, _ = loss_MiB(logit, data['label'], 
+                                          self.n_old_classes, self.n_new_classes,
                                             self.CEloss)
                     loss = loss_CE
+                elif self.config['method'] == 'PLOP':
+                    loss_CE, _ = loss_PLOP(logit, data['label'],
+                                     self.n_old_classes, self.n_new_classes, 
+                                     self.CEloss)
+                    loss = loss_CE
+                else:
+                    raise NotImplementedError(self.config['method'])
             self.scaler.scale(loss).backward()
             self.scaler.step(self.optimizer)
             self.scaler.update()
@@ -157,7 +176,7 @@ class Trainer_base(BaseTrainer):
             if self.config['method'] == 'DKD':   
                 self.train_metrics.update('loss_mbce', loss_mbce.mean().item())
                 self.train_metrics.update('loss_ac', loss_ac.mean().item())
-            elif self.config['method'] == 'MiB':
+            elif self.config['method'] == 'MiB' or self.config['method'] == 'PLOP':
                 self.train_metrics.update('loss_CE', loss_CE.mean().item())
             else :
                 raise NotImplementedError(self.config['method'])
@@ -206,8 +225,10 @@ class Trainer_base(BaseTrainer):
                     idx = (logit[:, 1:] > 0.5).float()  # logit: [N, C, H, W]
                     idx = idx.sum(dim=1)  # logit: [N, H, W]
                     pred[idx == 0] = 0  # set background (non-target class)
-                elif self.config['method'] == 'MiB':
+                elif self.config['method'] == 'MiB' or self.config['method'] == 'PLOP':
                     _, pred = logit.max(dim=1)
+                else :
+                    raise NotImplementedError(self.config['method'])
                 pred = pred.cpu().numpy()
                 self.evaluator_val.add_batch(target, pred)
                 labels = data['label'].type(torch.long)
@@ -293,8 +314,11 @@ class Trainer_base(BaseTrainer):
                     idx = idx.sum(dim=1)  # logit: [N, H, W]
 
                     pred[idx == 0] = 0  # set background (non-target class)
-                elif self.config['method'] == 'MiB':
+                # elif 'MIB' or 'PLOP'
+                elif self.config['method'] == 'MiB' or self.config['method'] == 'PLOP':
                     _, pred = logit.max(dim=1)
+                else:
+                    raise NotImplementedError(self.config['method'])
                 pred = pred.cpu().numpy()
                 self.evaluator_test.add_batch(target, pred)
 
@@ -366,7 +390,10 @@ class Trainer_incremental(Trainer_base):
         super().__init__(
             model=model, optimizer=optimizer, evaluator=evaluator, config=config, task_info=task_info,
             data_loader=data_loader, lr_scheduler=lr_scheduler, logger=logger, gpu=gpu)
-
+        self.threshold = 0.001 #entropy threshold
+        self.pseudo_labeling = 'entropy'
+        self.n_current_classes =  self.n_old_classes + self.n_new_classes
+        self.nb_new_classes = self.n_new_classes
         if config['multiprocessing_distributed']:
             if gpu is not None:
                 if model_old is not None:
@@ -384,6 +411,10 @@ class Trainer_incremental(Trainer_base):
             self.loss_name = ['loss', 'loss_mbce', 'loss_kd', 'loss_ac', 'loss_dkd_pos', 'loss_dkd_neg']
         elif self.config['method'] == 'MiB':
             self.loss_name = ['loss', 'loss_CE', 'loss_KD']
+        elif self.config['method'] == 'PLOP':
+            self.loss_name = ['loss', 'loss_CE', 'loss_POD']
+        else :
+            raise NotImplementedError(self.config['method'])
         self.train_metrics = MetricTracker(
             keys=self.loss_name,
             writer=self.writer, colums=['total', 'counts', 'average'],
@@ -395,10 +426,12 @@ class Trainer_incremental(Trainer_base):
             self.KDLoss = KDLoss(pos_weight=None, reduction='none')
         elif self.config['method'] == 'MiB' :
             self.KDLoss = UnbiasedKnowledgeDistillationLoss(alpha=self.config['hyperparameter']['alpha'])
+        elif self.config['method'] == 'PLOP':
+            self.PodLoss = features_distillation
         else :
             raise NotImplementedError(self.config['method'])
 
-    def _print_train_info(self):
+    def _print_train_info(self):        
         if self.config['method'] == 'DKD':
             self.logger.info(f"pos_weight - {self.config['hyperparameter']['pos_weight']}")
             self.logger.info(f"Total loss = {self.config['hyperparameter']['mbce']} * L_mbce + {self.config['hyperparameter']['kd']} * L_kd "
@@ -406,8 +439,23 @@ class Trainer_incremental(Trainer_base):
                             f"+ {self.config['hyperparameter']['ac']} * L_ac")
         elif self.config['method'] == 'MiB' :
             self.logger.info(f"Total loss = L_UnCE + {self.config['hyperparameter']['kd']} * L_UnKD (alpha : {self.config['hyperparameter']['alpha']})")
+        elif self.config['method'] == 'PLOP':
+            self.logger.info(f"Total loss = L_CE + POD_loss")
         else :
             raise NotImplementedError(self.config['method'])
+    def _before_train(self):
+        if self.config['method'] == 'PLOP':
+            if self.pseudo_labeling is None:
+                return
+            if self.pseudo_labeling.split("_")[0] == "median" and self.step > 0:
+                self.logger.info("Find median score")
+                self.thresholds, _ = self.find_best_value(mode="median")
+            elif self.pseudo_labeling.split("_")[0] == "entropy" and self.step > 0: # in plop
+                self.logger.info("Find median score with entropy")
+                self.thresholds, self.max_entropy = self.find_best_value(mode="entropy")
+        else :
+            self.logger.info(f"No jobs before train {self.config['method']}")
+            return
     def _train_epoch(self, epoch):
         """
         Training logic for an epoch
@@ -436,7 +484,7 @@ class Trainer_incremental(Trainer_base):
         for batch_idx, data in enumerate(self.train_loader):
             self.optimizer.zero_grad(set_to_none=True)
             data['image'], data['label'] = data['image'].to(self.device), data['label'].to(self.device)
-            
+            labels = data['label'].type(torch.long)
             with torch.cuda.amp.autocast(enabled=self.config['use_amp']):
                 logit, features = self.model(data['image'], ret_intermediate=True)
 
@@ -455,9 +503,51 @@ class Trainer_incremental(Trainer_base):
                                                 self.CEloss,self.KDLoss, logit_old)
                     loss_CE, loss_KD = loss_out
                     loss = loss_CE + self.config['hyperparameter']['kd'] * loss_KD
+                elif self.config['method'] == 'PLOP':
+                    
+                    ############
+                    # psuedo labeling
+                    # original_labels = labels.clone()
+                    mask_background = labels < self.n_old_classes
+                    # self.pseudo_labeling == "entropy":
+                    probs = torch.softmax(logit_old, dim=1)
+                    max_probs, pseudo_labels = probs.max(dim=1)
+                    mask_valid_pseudo = (entropy(probs) /
+                                         self.max_entropy) < self.thresholds[pseudo_labels]
+                    ############
+                    # All old labels that are NOT confident enough to be used as pseudo labels:
+                    labels[~mask_valid_pseudo & mask_background] = 255
+                    labels[mask_valid_pseudo & mask_background] = pseudo_labels[mask_valid_pseudo &
+                                                                                        mask_background]
+                    ############
+                    # Number of old/bg pixels that are certain
+                    num = (mask_valid_pseudo & mask_background).float().sum(dim=(1,2))
+                    # Number of old/bg pixels
+                    den =  mask_background.float().sum(dim=(1,2))
+                    # If all old/bg pixels are certain the factor is 1 (loss not changed)
+                    # Else the factor is < 1, i.e. the loss is reduced to avoid
+                    # giving too much importance to new pixels
+                    classif_adaptive_factor = num / (den + 1e-6)
+                    classif_adaptive_factor = classif_adaptive_factor[:, None, None]
+
+                    # features has key? -  dict_keys(['body', 'pre_logits', 'attentions', 'sem_logits_small'])
+                    # pos_neg
+                    attentions_old = features_old["attentions"]
+                    attentions = features["attentions"]
+                    # if self.pod_logits: True
+                    attentions_old.append(features_old["sem_logits_small"])
+                    attentions.append(features["sem_logits_small"])
+                    loss_out = loss_PLOP(logit, labels,
+                                         self.n_old_classes, self.n_new_classes, 
+                                         self.CEloss, self.PodLoss, logit_old, 
+                                         attentions, attentions_old,
+                                         classif_adaptive_factor)
+                    loss_CE, loss_POD = loss_out
+                    loss = loss_CE + loss_POD
+                    
                 else :
                     raise NotImplementedError(self.config['method'])
-                labels = data['label'].type(torch.long)
+                
                 if (batch_idx == len(self.train_loader) -1 and wandb_log_done is False) or \
                     wandb_log_done is False and ( any([lbl in torch.unique(labels) for lbl in self.task_info['new_class']]) ) :
                     loss_dict = {'loss': loss.item()}
@@ -489,6 +579,11 @@ class Trainer_incremental(Trainer_base):
             elif self.config['method'] == 'MiB':
                 self.train_metrics.update('loss_CE', loss_CE.mean().item())
                 self.train_metrics.update('loss_KD', loss_KD.mean().item())
+            elif self.config['method'] == 'PLOP':
+                self.train_metrics.update('loss_CE', loss_CE.mean().item())
+                self.train_metrics.update('loss_POD', loss_POD.mean().item())
+            else :
+                raise NotImplementedError(self.config['method'])
             # Get First lr
             if batch_idx == 0:
                 self.writer.add_scalars('lr', {'lr': self.optimizer.param_groups[0]['lr']}, epoch - 1)
@@ -513,3 +608,90 @@ class Trainer_incremental(Trainer_base):
                 val_flag = True
 
         return log, val_flag
+
+    def find_best_value(self,mode="probability"):
+        """Find the median prediction score per class with the old model.
+
+        Computing the median naively uses a lot of memory, to allievate it, instead
+        we put the prediction scores into a histogram bins and approximate the median.
+
+        https://math.stackexchange.com/questions/2591946/how-to-find-median-from-a-histogram
+        """
+        if mode == "entropy":
+            max_value = torch.log(torch.tensor(self.n_current_classes).float().to(self.device))
+            nb_bins = 100
+        else:
+            max_value = 1.0
+            nb_bins = 20  # Bins of 0.05 on a range [0, 1]
+
+        histograms = torch.zeros(self.n_current_classes, nb_bins).long().to(self.device)
+
+        for cur_step, data in enumerate(self.train_loader):
+            images, labels = data['image'], data['label']
+            del data
+            images = images.to(self.device, dtype=torch.float32)
+            labels = labels.to(self.device, dtype=torch.long)
+
+            outputs_old, features_old = self.model_old(images, ret_intermediate=False)
+
+            mask_bg = labels == 0
+            probas = torch.softmax(outputs_old, dim=1)
+            max_probas, pseudo_labels = probas.max(dim=1)
+
+            if mode == "entropy":
+                values_to_bins = entropy(probas)[mask_bg].view(-1) / max_value
+            else:
+                values_to_bins = max_probas[mask_bg].view(-1)
+
+            x_coords = pseudo_labels[mask_bg].view(-1)
+            y_coords = torch.clamp((values_to_bins * nb_bins).long(), max=nb_bins - 1)
+
+            histograms.index_put_(
+                (x_coords, y_coords),
+                torch.LongTensor([1]).expand_as(x_coords).to(histograms.device),
+                accumulate=True
+            )
+
+            if cur_step % 10 == 0:
+                self.logger.info(f"Median computing {cur_step}/{len(self.train_loader)}.")
+            import gc
+            gc.collect()
+        thresholds = torch.zeros(self.n_current_classes, dtype=torch.float32).to(
+            self.device
+        )  # zeros or ones? If old_model never predict a class it may be important
+
+        self.logger.info("Approximating median")
+        for c in range(self.n_current_classes):
+            total = histograms[c].sum()
+            if total <= 0.:
+                continue
+
+            half = total / 2
+            running_sum = 0.
+            for lower_border in range(nb_bins):
+                lower_border = lower_border / nb_bins
+                bin_index = int(lower_border * nb_bins)
+                if half >= running_sum and half <= (running_sum + histograms[c, bin_index]):
+                    break
+                running_sum += lower_border * nb_bins
+
+            median = lower_border + ((half - running_sum) /
+                                     histograms[c, bin_index].sum()) * (1 / nb_bins)
+
+            thresholds[c] = median
+
+        base_threshold = self.threshold
+        if "_" in mode:
+            mode, base_threshold = mode.split("_")
+            base_threshold = float(base_threshold)
+        # if self.step_threshold is not None:
+        #     self.threshold += self.step * self.step_threshold
+
+        if mode == "entropy":
+            for c in range(len(thresholds)):
+                thresholds[c] = max(thresholds[c], base_threshold)
+        else:
+            for c in range(len(thresholds)):
+                thresholds[c] = min(thresholds[c], base_threshold)
+        self.logger.info(f"Finished computing median {thresholds}")
+        return thresholds.to(self.device), max_value

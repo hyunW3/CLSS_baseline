@@ -13,7 +13,6 @@ import models.model as module_arch
 import utils.metric as module_metric
 import utils.lr_scheduler as module_lr_scheduler
 import data_loader.data_loaders as module_data
-# from trainer.trainer_ade import Trainer_base, Trainer_incremental
 from trainer.trainer import Trainer_base, Trainer_incremental
 from utils.parse_config import ConfigParser
 from logger.logger import Logger
@@ -195,6 +194,9 @@ def main_worker(gpu, ngpus_per_node, config):
     logger.print(f"{torch.randint(0, 100, (1, 1))}")
     torch.distributed.barrier()
 
+    # step > 1
+    if task_step > 0:
+        trainer._before_train() # PLOP median value 
     trainer.train()
     trainer.test()
 

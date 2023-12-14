@@ -62,10 +62,21 @@ class DeepLabV3(nn.Module):
         )
 
         if ret_intermediate:
-            sem_neg_logits_small = self.forward_class_prediction_negative(x_pl)
-            sem_pos_logits_small = self.forward_class_prediction_positive(x_pl)
-            
-            return sem_logits, {'neg_reg': sem_neg_logits_small, 'pos_reg': sem_pos_logits_small}
+            if self.method == 'DKD':
+                sem_neg_logits_small = self.forward_class_prediction_negative(x_pl)
+                sem_pos_logits_small = self.forward_class_prediction_positive(x_pl)
+                
+                return sem_logits, {'neg_reg': sem_neg_logits_small, 'pos_reg': sem_pos_logits_small}
+            elif self.method == 'MiB':
+                return sem_logits, {}
+            elif self.method == 'PLOP':
+
+                return sem_logits, {
+                "attentions": attentions + [x_pl],
+                "sem_logits_small": sem_logits_small
+            }
+            else :
+                raise NotImplementedError(f"Not implemented method, {self.method}")
         else:
             return sem_logits, {}
 
@@ -78,7 +89,12 @@ class DeepLabV3(nn.Module):
         out = []
         for i, mod in enumerate(self.cls):
             if i == 0:
-                out.append(mod(x_pl.detach()))  # [N, c, H, W]
+                if self.method == 'DKD':
+                    # AC is not used
+                    out.append(mod(x_pl.detach()))  # [N, c, H, W]
+                else:
+                    # Background classifier
+                    out.append(mod(x_pl))  # [N, c, H, W]
             else:
                 out.append(mod(x_pl))  # [N, c, H, W]
         x_o = torch.cat(out, dim=1)  # [N, |Ct|, H, W]
@@ -118,22 +134,21 @@ class DeepLabV3(nn.Module):
                 nn.init.constant_(m.bias, 0)
 
     def init_novel_classifier(self):
+        cls = self.cls[-1]  # New class classifier
         if self.method == 'DKD':
             # Initialize novel classifiers using an auxiliary classifier
-            cls = self.cls[-1]  # New class classifier
             for i in range(self.classes[-1]):
                 cls.weight[i:i + 1].data.copy_(self.cls[0].weight)
                 cls.bias[i:i + 1].data.copy_(self.cls[0].bias)
-        elif self.method == 'MiB':
+        elif self.method == 'MiB' or self.method == 'PLOP':
             # Initialize novel classifiers using a background classifier
-            cls = self.cls[-1]  # New class classifier  
             # As MiB code implemented
             bias_diff = torch.log(torch.FloatTensor([self.classes[-1]+1]))
             new_bias = self.cls[0].bias.data - bias_diff
             for i in range(self.classes[-1]):
                 cls.weight[i:i+1].data.copy_(self.cls[0].weight)
                 cls.bias[i:i+1].data.copy_(new_bias)    
-            # self.cls[0].bias.data.copy_(new_bias)  # it ruins mIoU_new?
+            # set the bias of background classifier same weight as the last class
             self.cls[0].bias[0].data.copy_(new_bias.squeeze(0))
             print("Bg classifier bias[0] updated")
             # print("No bg classifier updated")

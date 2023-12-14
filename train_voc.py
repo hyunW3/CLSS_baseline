@@ -14,7 +14,6 @@ import models.model as module_arch
 import utils.metric as module_metric
 import utils.lr_scheduler as module_lr_scheduler
 import data_loader.data_loaders as module_data
-# from trainer.trainer_voc import Trainer_base, Trainer_incremental
 from trainer.trainer import Trainer_base, Trainer_incremental
 from utils.parse_config import ConfigParser
 from logger.logger import Logger
@@ -216,7 +215,8 @@ def main_worker(gpu, ngpus_per_node, config):
 
     logger.print(f"{torch.randint(0, 100, (1, 1))}")
     torch.distributed.barrier()
-
+    if task_step > 0:
+        trainer._before_train() # PLOP median value 
     trainer.train()
     trainer.test()
 
@@ -258,6 +258,6 @@ if __name__ == '__main__':
         CustomArgs(['--test'], action='store_true', target='test'),
     ]
     config = ConfigParser.from_args(args, options)
-    assert config['method'] in ['DKD', 'MiB'], "Only DKD and MiB are supported"
+    assert config['method'] in ['DKD', 'MiB','PLOP'], "Only DKD and MiB are supported"
     assert config['method'] in config['name'], f"Name should contain the method name, {config['method']} in {config['name']}"
     main(config)

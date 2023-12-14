@@ -176,3 +176,202 @@ class UnbiasedKnowledgeDistillationLoss(nn.Module):
             outputs = -loss
 
         return outputs
+
+# PLOP
+def features_distillation(
+    list_attentions_a, # features from model_old
+    list_attentions_b, # features from model
+    collapse_channels="local",
+    normalize=True,
+    labels=None,
+    index_new_class=None,
+    pod_apply="all",
+    pod_deeplab_mask=False,
+    pod_deeplab_mask_factor=None,
+    interpolate_last=False,
+    pod_factor=0.0, # original : 1.0
+    prepro="pow",
+    deeplabmask_upscale=True,
+    spp_scales=[1, 2, 4],
+    pod_options={"switch": {"after": {"extra_channels": "sum", "factor": 0.0005, "type": "local"}}}, 
+    outputs_old=None,
+    use_pod_schedule=True,
+    nb_current_classes=-1, # bg + old + new
+    nb_new_classes=-1
+):
+    """A mega-function comprising several features-based distillation.
+
+    :param list_attentions_a: A list of attention maps, each of shape (b, n, w, h).
+    :param list_attentions_b: A list of attention maps, each of shape (b, n, w, h).
+    :param collapse_channels: How to pool the channels.
+    :param memory_flags: Integer flags denoting exemplars.
+    :param only_old: Only apply loss to exemplars.
+    :return: A float scalar loss.
+    """
+    device = list_attentions_a[0].device
+
+    assert len(list_attentions_a) == len(list_attentions_b)
+
+    #if collapse_channels in ("spatial_tuple", "spp", "spp_noNorm", "spatial_noNorm"):
+    normalize = False
+
+    apply_mask = "background"
+    upscale_mask_topk = 1
+    mask_position = "last"  # Others choices "all" "backbone"
+    use_adaptative_factor = False
+    mix_new_old = None
+
+    loss = torch.tensor(0.).to(list_attentions_a[0].device)
+    for i, (a, b) in enumerate(zip(list_attentions_a, list_attentions_b)):
+        adaptative_pod_factor = 1.0
+        difference_function = "frobenius"
+        pool = True
+        use_adaptative_factor = False
+        handle_extra_channels = "sum"
+        normalize_per_scale = False
+
+        if pod_options and pod_options.get("switch"):
+            if i < len(list_attentions_a) - 1:
+                if "before" in pod_options["switch"]:
+                    collapse_channels = pod_options["switch"]["before"].get(
+                        "type", collapse_channels
+                    )
+                    pod_factor = pod_options["switch"]["before"].get("factor", pod_factor)
+                    normalize = pod_options["switch"]["before"].get("norm", False)
+                    prepro = pod_options["switch"]["before"].get("prepro", prepro)
+                    use_adaptative_factor = pod_options["switch"]["before"].get(
+                        "use_adaptative_factor", use_adaptative_factor
+                    )
+            else:
+                if "after" in pod_options["switch"]:
+                    collapse_channels = pod_options["switch"]["after"].get(
+                        "type", collapse_channels
+                    )
+                    pod_factor = pod_options["switch"]["after"].get("factor", pod_factor)
+                    normalize = pod_options["switch"]["after"].get("norm", False)
+                    prepro = pod_options["switch"]["after"].get("prepro", prepro)
+
+                    apply_mask = pod_options["switch"]["after"].get("apply_mask", apply_mask)
+                    upscale_mask_topk = pod_options["switch"]["after"].get(
+                        "upscale_mask_topk", upscale_mask_topk
+                    )
+                    use_adaptative_factor = pod_options["switch"]["after"].get(
+                        "use_adaptative_factor", use_adaptative_factor
+                    )
+                    mix_new_old = pod_options["switch"]["after"].get("mix_new_old", mix_new_old)
+
+                    handle_extra_channels = pod_options["switch"]["after"].get(
+                        "extra_channels", handle_extra_channels
+                    )
+                    spp_scales = pod_options["switch"]["after"].get(
+                        "spp_scales", spp_scales
+                    )
+                    use_pod_schedule = pod_options["switch"]["after"].get(
+                        "use_pod_schedule", use_pod_schedule
+                    )
+
+            mask_position = pod_options["switch"].get("mask_position", mask_position)
+            normalize_per_scale = pod_options["switch"].get(
+                "normalize_per_scale", normalize_per_scale
+            )
+            pool = pod_options.get("pool", pool)
+
+        if a.shape[1] != b.shape[1]:
+            assert i == len(list_attentions_a) - 1
+            assert a.shape[0] == b.shape[0]
+            assert a.shape[2] == b.shape[2]
+            assert a.shape[3] == b.shape[3]
+
+            assert handle_extra_channels in ("trim", "sum"), handle_extra_channels
+
+            if handle_extra_channels == "sum":
+                _b = torch.zeros_like(a).to(a.dtype).to(a.device)
+                _b[:, 0] = b[:, 0] + b[:, index_new_class:].sum(dim=1)
+                _b[:, 1:] = b[:, 1:index_new_class]
+                b = _b
+            elif handle_extra_channels == "trim":
+                b = b[:, :index_new_class]
+
+        # shape of (b, n, w, h)
+        assert a.shape == b.shape, (a.shape, b.shape)
+
+        if prepro == "pow":
+            a = torch.pow(a, 2)
+            b = torch.pow(b, 2)
+        else:
+            raise NotImplementedError(f"Unknown prepro={prepro}")
+
+        if collapse_channels == "local":
+            a = _local_pod(
+                a, spp_scales, normalize=False, normalize_per_scale=normalize_per_scale
+            )
+            b = _local_pod(
+                b, spp_scales, normalize=False, normalize_per_scale=normalize_per_scale
+            )
+        else:
+            raise ValueError("Unknown method to collapse: {}".format(collapse_channels))
+
+        if normalize:
+            a = F.normalize(a, dim=1, p=2)
+            b = F.normalize(b, dim=1, p=2)
+
+        if difference_function == "frobenius":
+            if isinstance(a, list):
+                layer_loss = torch.tensor(
+                    [torch.frobenius_norm(aa - bb, dim=-1) for aa, bb in zip(a, b)]
+                ).to(device)
+            else:
+                layer_loss = torch.frobenius_norm(a - b, dim=-1)
+        else:
+            raise NotImplementedError(f"Unknown difference_function={difference_function}")
+
+        assert torch.isfinite(layer_loss).all(), layer_loss
+        assert (layer_loss >= 0.).all(), layer_loss
+
+        layer_loss = torch.mean(adaptative_pod_factor * layer_loss)
+        if pod_factor <= 0.:
+            continue
+
+        layer_loss = pod_factor * layer_loss
+        if use_pod_schedule:
+            layer_loss = layer_loss * math.sqrt(nb_current_classes / nb_new_classes)
+        loss += layer_loss
+
+    return loss / len(list_attentions_a)
+
+def _local_pod(x, spp_scales=[1, 2, 4], normalize=False, normalize_per_scale=False):
+    b = x.shape[0]
+    w = x.shape[-1]
+    emb = []
+
+    for scale_index, scale in enumerate(spp_scales):
+        k = w // scale
+
+        nb_regions = scale**2
+
+        for i in range(scale):
+            for j in range(scale):
+                tensor = x[..., i * k:(i + 1) * k, j * k:(j + 1) * k]
+
+                horizontal_pool = tensor.mean(dim=3).view(b, -1)
+                vertical_pool = tensor.mean(dim=2).view(b, -1)
+
+                if normalize_per_scale is True:
+                    horizontal_pool = horizontal_pool / nb_regions
+                    vertical_pool = vertical_pool / nb_regions
+                elif normalize_per_scale == "spm":
+                    if scale_index == 0:
+                        factor = 2 ** (len(spp_scales) - 1)
+                    else:
+                        factor = 2 ** (len(spp_scales) - scale_index)
+                    horizontal_pool = horizontal_pool / factor
+                    vertical_pool = vertical_pool / factor
+
+                if normalize:
+                    horizontal_pool = F.normalize(horizontal_pool, dim=1, p=2)
+                    vertical_pool = F.normalize(vertical_pool, dim=1, p=2)
+
+                emb.append(horizontal_pool)
+                emb.append(vertical_pool)
+
+    return torch.cat(emb, dim=1)
