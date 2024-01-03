@@ -1,123 +1,51 @@
-# Decomposed Knowledge Distillation for Class-Incremental Semantic Segmentation
+# CLSS (Contiunal Learning Semantic Segmentation) baselines
+- This is CLSS baseline implementation
+- Currently, it includes MiB, PLOP, DKD.
+- The main implementation is based on dataset VOC2012 and ResNet-101 backbone.
+- ADE 20K dataset is not supported currently, but will be supported soon. 
 
-This is an official implementation of the paper "Decomposed Knowledge Distillation for Class-Incremental Semantic Segmentation", accepted to NeurIPS 2022.
+## Environment
+- CUDA 11.1
+- python 3.8
+- The shell code for setting environment is in `scripts/env_create.sh`
 
-For more information, please checkout the project site [[website](https://cvlab.yonsei.ac.kr/projects/DKD/)] and our paper [[arXiv](http://arxiv.org/abs/2210.05941) / [OpenReview](https://openreview.net/forum?id=0SgKq4ZC9r)].
-
-## Pre-requisites
-This repository has been tested with the following libraries:
-* Python (3.6)
-* Pytorch (1.8.1)
-
-## Getting Started
-
-### Datasets
-#### PASCAL VOC 2012
-We use augmented 10,582 training samples and 1,449 validation samples for PASCAL VOC 2012. You can download the original dataset in [here](http://host.robots.ox.ac.uk/pascal/VOC/voc2012/index.html#devkit). To train our model with augmented samples, please download labels of augmented samples (['SegmentationClassAug'](https://www.dropbox.com/s/oeu149j8qtbs1x0/SegmentationClassAug.zip)) and file names (['train_aug.txt'](https://github.com/cvlab-yonsei/DKD/releases/download/v1.0/train_aug.txt)). The structure of data path should be organized as follows:
-```bash
-└── /dataset/VOC2012
-    ├── Annotations
-    ├── ImageSets
-    │   └── Segmentation
-    │       ├── train_aug.txt
-    │       └── val.txt
-    ├── JPEGImages
-    ├── SegmentationClass
-    └── SegmentationClassAug
+## training
+- The shell code for training is in `./z_exp_individual_cmd`
 ```
-
-#### ADE20K
-We use 20,210 training samples and 2,000 validation samples for ADE20K. You can download the dataset in [here](http://sceneparsing.csail.mit.edu/). The structure of data path should be organized as follows:
-```bash
-└── /dataset/ADEChallengeData2016
-    ├── annotations
-    ├── images
-    ├── objectInfo150.txt
-    └── sceneCategories.txt
+    ./train_{dataset}_{scenarios}_{method}.sh
+    For examples, ./train_voc_10-1_DKD.sh
+    For MiB, PLOP which require 2 GPUs, please pass the argument GPU_NUMBER (ex 0,1) to .sh file
 ```
+- The configuration for each method is in 'configs/config_{dataset}_{method}.yaml'
+- The results are updated in wandb 
 
-### Training
-#### PASCAL VOC 2012
-```Shell
-# An example srcipt for 15-5 overlapped setting of PASCAL VOC
 
-GPU=0,1,2,3
-BS=8  # Total 32
-SAVEDIR='saved_voc'
+## configuration for each baseline
+### Pascal VOC 2012
+| coonfig                                  | MiB                                        | PLOP                        | DKD                | STAR                |
+|------------------------------------------|--------------------------------------------|-----------------------------|--------------------|---------------------|
+| epoch                                    | 30                                         | 30                          | 60                 | 60                  |
+| lr                                       | 0.01 / 0.001                               | 0.01 / 0.001                | 0.001/ 0.0001      | 0.001/ 0.0001       |
+| $\gamma$ (pos weight for BCE Loss)       | UnCE                                       | 1                           | 2 / 1              | 4                   |
+| Optimizer                                | SGD (momentum 0.9, wd 1e-4, nesterov True) | SGD (momentum 0.9, wd 1e-4) | SGD (momentum 0.9) | Adam (momentum 0.9) |
+| $\alpha,\beta$ (hyperparameter for loss) | 10 (lkd)                                   | 1 (pod)                     | 5 / 5 (kd / dkd)   | 5 / 0.05 (pkd/cont) |
+| batch size                               | 24                                         | 24                          | 32                 | 24                  |
+| lr Schedular                             | PolyLR                                     | PolyLR                      | PolyLR             |                     |
+| GPUs                                     | RTX titian x 2                             | ? x 2                           | A5000 x 4          | RTX 3090 x 2        |
+| augmentation                             | same as [1]                                |
 
-TASKSETTING='overlap'  # or 'disjoint'
-TASKNAME='15-5' # or ['15-1', '19-1', '10-1', '5-3']
-EPOCH=60
-INIT_LR=0.001
-LR=0.0001
-INIT_POSWEIGHT=2
-MEMORY_SIZE=0  # 100 for DKD-M
-
-NAME='DKD'
-python train_voc.py -c configs/config_voc.json \
--d ${GPU} --multiprocessing_distributed --save_dir ${SAVEDIR} --name ${NAME} \
---task_name ${TASKNAME} --task_setting ${TASKSETTING} --task_step 0 --lr ${INIT_LR} --bs ${BS} --pos_weight ${INIT_POSWEIGHT}
-
-python train_voc.py -c configs/config_voc.json \
--d ${GPU} --multiprocessing_distributed --save_dir ${SAVEDIR} --name ${NAME} \
---task_name ${TASKNAME} --task_setting ${TASKSETTING} --task_step 1 --lr ${LR} --bs ${BS} --freeze_bn --mem_size ${MEMORY_SIZE}
-```
-
-#### ADE20K
-```Shell
-# An example srcipt for 50-50 overlapped setting of ADE20K
-
-GPU=0,1,2,3
-BS=6  # Total 24
-SAVEDIR='saved_ade'
-
-TASKSETTING='overlap'
-TASKNAME='50-50' # or ['100-10', '100-50']
-EPOCH=100
-INIT_LR=0.0025
-LR=0.00025
-MEMORY_SIZE=0 # 300 for DKD-M
-
-NAME='DKD'
-python train_ade.py -c configs/config_ade.json \
--d ${GPU} --multiprocessing_distributed --save_dir ${SAVEDIR} --name ${NAME} \
---task_name ${TASKNAME} --task_setting ${TASKSETTING} --task_step 0 --lr ${INIT_LR} --bs ${BS}
-
-python train_ade.py -c configs/config_ade.json \
--d ${GPU} --multiprocessing_distributed --save_dir ${SAVEDIR} --name ${NAME} \
---task_name ${TASKNAME} --task_setting ${TASKSETTING} --task_step 1 --lr ${LR} --bs ${BS} --freeze_bn --mem_size ${MEMORY_SIZE}
-
-python train_ade.py -c configs/config_ade.json \
--d ${GPU} --multiprocessing_distributed --save_dir ${SAVEDIR} --name ${NAME} \
---task_name ${TASKNAME} --task_setting ${TASKSETTING} --task_step 2 --lr ${LR} --bs ${BS} --freeze_bn --mem_size ${MEMORY_SIZE}
-```
-
-### Testing
-#### PASCAL VOC 2012
-```Shell
-python eval_voc.py -d 0 -r path/to/weight.pth
-```
-We provide pretrained weights and configuration files. The results should be:
-|  Method<br>(Overlapped)   | VOC 19-1<br>(2 steps)<br>$\text{hIoU}$ / $\text{mIoU}_{\text{all}}$ | VOC 15-5<br>(2 steps)<br>$\text{hIoU}$ / $\text{mIoU}_{\text{all}}$ | VOC 15-1<br>(6 steps)<br>$\text{hIoU}$ / $\text{mIoU}_{\text{all}}$ | VOC 10-1<br>(11 steps)<br>$\text{hIoU}$ / $\text{mIoU}_{\text{all}}$ | VOC 5-3<br>(6 steps)<br>$\text{hIoU}$ / $\text{mIoU}_{\text{all}}$ |
-| :-    | :-----------: | :-----------: | :-----------: | :-----------: | :-----------: |
-| DKD   | [56.95 / 76.13](https://github.com/cvlab-yonsei/DKD/releases/download/v1.0/voc_overlapped_19-1.zip) | [67.17 / 73.95](https://github.com/cvlab-yonsei/DKD/releases/download/v1.0/voc_overlapped_15-1.zip) | [57.46 / 70.50](https://github.com/cvlab-yonsei/DKD/releases/download/v1.0/voc_overlapped_15-1.zip) | [57.21 / 60.43](https://github.com/cvlab-yonsei/DKD/releases/download/v1.0/voc_overlapped_10-1.zip) | [61.32 / 58.98](https://github.com/cvlab-yonsei/DKD/releases/download/v1.0/voc_overlapped_5-3.zip) |
-| DKD-M | [68.14 / 77.04](https://github.com/cvlab-yonsei/DKD/releases/download/v1.0/voc_overlapped_19-1_memory.zip) | [68.96 / 74.84](https://github.com/cvlab-yonsei/DKD/releases/download/v1.0/voc_overlapped_15-5_memory.zip) | [64.09 / 72.95](https://github.com/cvlab-yonsei/DKD/releases/download/v1.0/voc_overlapped_15-1_memory.zip) | [64.89 / 66.20](https://github.com/cvlab-yonsei/DKD/releases/download/v1.0/voc_overlapped_10-1_memory.zip) | [65.02 / 63.32](https://github.com/cvlab-yonsei/DKD/releases/download/v1.0/voc_overlapped_5_3_memory.zip) |
-
-|  Method<br>(Disjoint)   | VOC 19-1<br>(2 steps)<br>$\text{hIoU}$ / $\text{mIoU}_{\text{all}}$ | VOC 15-5<br>(2 steps)<br>$\text{hIoU}$ / $\text{mIoU}_{\text{all}}$ | VOC 15-1<br>(6 steps)<br>$\text{hIoU}$ / $\text{mIoU}_{\text{all}}$ | 
-| :-    | :-----------: | :-----------: | :-----------: |
-| DKD   | [57.98 / 75.90](https://github.com/cvlab-yonsei/DKD/releases/download/v1.0/voc_disjoint_19-1.zip) | [64.35 / 72.21](https://github.com/cvlab-yonsei/DKD/releases/download/v1.0/voc_disjoint_15-1.zip) | [54.21 / 68.48](https://github.com/cvlab-yonsei/DKD/releases/download/v1.0/voc_disjoint_15-1.zip) |
-| DKD-M | [67.12 / 76.84](https://github.com/cvlab-yonsei/DKD/releases/download/v1.0/voc_disjoint_19-1_memory.zip) | [65.04 / 72.53](https://github.com/cvlab-yonsei/DKD/releases/download/v1.0/voc_disjoint_15-5_memory.zip) | [60.32 / 70.78](https://github.com/cvlab-yonsei/DKD/releases/download/v1.0/voc_disjoint_15-1_memory.zip) |
-
-#### ADE20K
-```Shell
-python eval_ade.py -d 0 -r path/to/weight.pth
-```
-We provide pretrained weights and configuration files. The results should be:
-|  Method     | ADE 100-50<br>(2 steps)<br>$\text{hIoU}$ / $\text{mIoU}_{\text{all}}$ | ADE 100-10<br>(6 steps)<br>$\text{hIoU}$ / $\text{mIoU}_{\text{all}}$ | ADE 50-50<br>(3 steps)<br>$\text{hIoU}$ / $\text{mIoU}_{\text{all}}$ |
-| :---- | :-----------: | :-----------: | :-----------: |
-| DKD   | [29.42 / 35.55](https://github.com/cvlab-yonsei/DKD/releases/download/v1.0/ade_overlapped_100-50.zip) | [26.79 / 34.53](https://github.com/cvlab-yonsei/DKD/releases/download/v1.0/ade_overlapped_100-10.zip) | [34.77 / 34.39](https://github.com/cvlab-yonsei/DKD/releases/download/v1.0/ade_overlapped_50-50.zip) |
-| DKD-M | [29.45 / 35.58](https://github.com/cvlab-yonsei/DKD/releases/download/v1.0/ade_overlapped_100-50_memory.zip) | [27.44 / 34.83](https://github.com/cvlab-yonsei/DKD/releases/download/v1.0/ade_overlapped_100-10.zip) | [34.78 / 34.39](https://github.com/cvlab-yonsei/DKD/releases/download/v1.0/ade_overlapped_50-50.zip) |
-
+### ADE 20K
+config	MiB	PLOP	DKD	STAR
+epoch	60	60	100	100
+lr	0.01 / 0.001	0.01 / 0.001	0.0025 / 0.00025	0.00025 / 0.000025
+$\gamma$ (pos weight for BCE Loss)	UnCE	1	35	30
+Optimizer	SGD (momentum 0.9, wd 1e-4)	SGD (momentum 0.9, wd 1e-4)	SGD (momentum 0.9)	Adam (momentum 0.9)
+$\alpha,\beta$ (hyperparameter for loss)	10 (lkd)	1 (pod)	5 / 5 (kd / dkd)	5 / 0.05 (pkd/cont)
+batch size	24	24	24	24
+lr Schedular	PolyLR	PolyLR	PolyLR + linear warm up	
+GPUs	RTX titian x 2	? x 2	A5000 x 4	RTX 3090 x 2
+augmentation	same as [1]			
 
 ## Acknowledgements
-* This template is borrowed from [pytorch-template](https://github.com/victoresque/pytorch-template).
+* This code is based on DKD (https://github.com/cvlab-yonsei/DKD#decomposed-knowledge-distillation-for-class-incremental-semantic-segmentation) codespaces.
+* All implementations have been borrowed from existing code implementations (MiB, DKD, PLOP)
