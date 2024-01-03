@@ -27,9 +27,16 @@ class Logger:
         self.logger.setLevel(self.log_levels[verbosity])
     def set_wandb(self, config):
         if self.rank == 0:
+            project_name = "CLSS"
+            if config['method'] == "base":
+                project_name = "CLSS_new-method"
+                self.wandb = wandb.init(
+                    project=project_name,
+                    tags=["finetune", config['method'],f"use_cosine{config['trainer']['use_cosine']}"],
+                )
             self.wandb = wandb.init(
-                project="[CLSS]_MiB",
-                tags=["baseline", config['method']],
+                project="CLSS",
+                tags=[config['method']],
             )
             method = f"_{config['name']}" if config['method'] not in  config['name'] else ""
             wandb.run.name = config['data_loader']['args']['task']['setting'] + '_' \

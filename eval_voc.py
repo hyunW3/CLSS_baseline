@@ -114,7 +114,7 @@ if __name__ == '__main__':
         CustomArgs(['--name'], type=str, target='name'),
         CustomArgs(['--save_dir'], type=str, target='trainer;save_dir'),
         
-        CustomArgs(['--test'], action='store_false', target='test'),
+        CustomArgs(['--test'], action='store_true', target='test'),
     ]
     config = ConfigParser.from_args(args, options)
     main(config)
