@@ -38,22 +38,32 @@ class ConfigParser:
             # run_id = datetime.now().strftime(r'%m%d_%H%M%S')
             self.run_id = f"step_{self.config['data_loader']['args']['task']['step']}"
 
-        self._save_dir = save_dir / 'models' / exper_name / self.run_id
-        self._log_dir = save_dir / 'log' / exper_name / self.run_id
+        self._save_dir = save_dir /  exper_name / self.run_id
+        self._log_dir = self._save_dir 
+        # self._log_dir = save_dir / 'log' / exper_name / self.run_id
 
         # make directory for saving checkpoints and log.
         exist_ok = self.run_id == ''
+        print("config : ", self.config['test'])
         try:
             if self.config['test'] is True:
                 raise FileExistsError
             if self.save_dir.exists() is False:
                 self.save_dir.mkdir(parents=True, exist_ok=exist_ok)
             else :
-                raise FileExistsError
+                # check if the *pth files exist in save_dir
+                # if exist, raise FileExistsError
+                if len(list(self.save_dir.glob('*.pth'))) > 0:
+                    raise FileExistsError
+                else:
+                    # remove the inside of save_dir
+                    for f in self.save_dir.glob('*'):
+                        f.unlink()
+                    
         except FileExistsError:
             if self.config['test'] is True:
                 run_id = datetime.now().strftime(r'%m%d_%H%M%S')
-                self._save_dir = save_dir / 'models' / exper_name / f'test_{run_id}'
+                self._save_dir = save_dir /  exper_name / f'test_{run_id}'
                 self.save_dir.mkdir(parents=True, exist_ok=exist_ok)
             else:
                 idx = 0
@@ -63,29 +73,13 @@ class ConfigParser:
                         self.config['data_loader']['args']['task']['setting'] + '_' \
                         + self.config['data_loader']['args']['task']['name'] + '_'\
                         + self.config['name'] + method + "_" + str(idx)
-                    self._save_dir = save_dir / 'models' / exper_name / self.run_id 
-                    self._log_dir = save_dir / 'log' / exper_name / self.run_id
+                    self._save_dir = save_dir / exper_name / self.run_id 
+                    self._log_dir = self._save_dir
+                    # self._log_dir = save_dir / 'log' / exper_name / self.run_id
                     if self.save_dir.exists() is False:
                         break
                 self.save_dir.mkdir(parents=True, exist_ok=exist_ok)
         print(self._save_dir)
-        try:
-            if self.config['test'] is True:
-                raise FileExistsError
-            # log_dir_exist = self.log_dir.exists()
-            if self.log_dir.exists() is False:
-                self.log_dir.mkdir(parents=True, exist_ok=exist_ok)
-            else :
-                raise FileExistsError
-        except FileExistsError:
-            if self.config['test'] is True:
-                run_id = datetime.now().strftime(r'%m%d_%H%M%S')
-                self._log_dir = save_dir / 'log' / exper_name / f'test_{run_id}'
-                # log_dir_exist = self.log_dir.exists()
-                self.log_dir.mkdir(parents=True, exist_ok=exist_ok)
-                pass
-            else:
-                raise FileExistsError
 
         # save updated config file to the checkpoint dir
         write_json(self.config, self.save_dir / 'config.json')
