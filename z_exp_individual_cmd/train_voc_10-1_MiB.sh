@@ -34,7 +34,7 @@ fi
 if [ $onlyIncremental = false ]; then
     alert_knock python train_voc.py -c configs/config_voc_MiB.json \
     -d ${GPU} --multiprocessing_distributed --dist_url ${PORT} --save_dir ${SAVEDIR} --name ${NAME} ${OPTION} \
-    --task_name ${TASKNAME} --task_setting ${TASKSETTING} --task_step 0 --lr ${INIT_LR} --bs ${BS} && 
+    --task_name ${TASKNAME} --task_setting ${TASKSETTING} --task_step 0 --lr ${INIT_LR} --bs ${BS} 
 fi
 alert_knock python train_voc.py -c configs/config_voc_MiB.json \
 -d ${GPU} --multiprocessing_distributed --dist_url ${PORT} --save_dir ${SAVEDIR} --name ${NAME} ${OPTION} \

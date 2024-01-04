@@ -42,3 +42,7 @@ cd ../z_exp_individual_cmd
 # ./train_voc_15-1_PLOP.sh 2,3
 # ./train_voc_15-1_MiB.sh 2,3
 
+# 0104 
+./train_voc_15-1_DKD.sh
+
+
