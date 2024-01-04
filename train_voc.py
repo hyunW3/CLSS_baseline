@@ -19,6 +19,8 @@ from utils.parse_config import ConfigParser
 from logger.logger import Logger
 from utils.memory import memory_sampling_balanced
 
+import traceback
+
 torch.backends.cudnn.benchmark = True
 
 
@@ -73,7 +75,9 @@ def main_worker(gpu, ngpus_per_node, config):
     # Create old Model
     if task_step > 0:
         model_old = config.init_obj('arch', module_arch, **{"method" : config['method'], \
-                                                            "classes": dataset.get_per_task_classes(task_step - 1)})
+                                                            "classes": dataset.get_per_task_classes(task_step - 1),\
+                                                                "use_cosine" : config['trainer']['use_cosine']
+                                                            })
         if config['multiprocessing_distributed'] and (config['arch']['args']['norm_act'] == 'bn_sync'):
             model_old = nn.SyncBatchNorm.convert_sync_batchnorm(model_old)
     else:
@@ -89,7 +93,8 @@ def main_worker(gpu, ngpus_per_node, config):
             logger, gpu,
         )
         dataset.get_memory(config, concat=True)
-    logger.info(f"{str(dataset)}")
+    method = config['method']
+    logger.info(f"{str(dataset)} / {method}")
     logger.info(f"{dataset.dataset_info()}")
 
     if config['multiprocessing_distributed']:
@@ -107,9 +112,11 @@ def main_worker(gpu, ngpus_per_node, config):
 
     # Create Model
     model = config.init_obj('arch', module_arch, **{"method" : config['method'], \
-                                                    "classes": dataset.get_per_task_classes()})
+                                                    "classes": dataset.get_per_task_classes(),
+                                                    "use_cosine" : config['trainer']['use_cosine']
+                                                    })
     model._set_bn_momentum(model.backbone, momentum=0.01)
-    logger.watch_wandb(model)
+    # logger.watch_wandb(model)
     # Convert BN to SyncBN for DDP
     if config['multiprocessing_distributed'] and (config['arch']['args']['norm_act'] == 'bn_sync'):
         model = nn.SyncBatchNorm.convert_sync_batchnorm(model)
@@ -133,7 +140,7 @@ def main_worker(gpu, ngpus_per_node, config):
             model.init_novel_classifier()
         else:
             logger.info('** Random Initialization **')
-        logger.watch_wandb(model_old)
+        # logger.watch_wandb(model_old)
     else:
         logger.info('Train from scratch')
 
@@ -178,7 +185,7 @@ def main_worker(gpu, ngpus_per_node, config):
     )
 
     old_classes, _ = dataset.get_task_labels(step=0) # 5 (1,2,3,4,5)
-    new_classes = [] # setp1 추가되는 친구들 들어감. 
+    new_classes = [] # the class after step1  
     # new classes : step 1 ~ task_step
     for i in range(1, task_step + 1):
         c, _ = dataset.get_task_labels(step=i)
@@ -215,10 +222,15 @@ def main_worker(gpu, ngpus_per_node, config):
 
     logger.print(f"{torch.randint(0, 100, (1, 1))}")
     torch.distributed.barrier()
-    if task_step > 0:
-        trainer._before_train() # PLOP median value 
-    trainer.train()
-    trainer.test()
+    try:
+        if task_step > 0:
+            trainer._before_train() # PLOP median value 
+        trainer.train()
+        trainer.test()
+    except Exception as e:
+        logger.error(f"Exception: {e}")
+        logger.error(traceback.format_exc())
+        logger.exception(e)
 
 
 if __name__ == '__main__':
@@ -256,8 +268,12 @@ if __name__ == '__main__':
         CustomArgs(['--ac'], type=float, target='hyperparameter;ac'),
         CustomArgs(['--freeze_bn'], action='store_true', target='arch;args;freeze_all_bn'),
         CustomArgs(['--test'], action='store_true', target='test'),
+
+        CustomArgs(['--use_cosine'], action='store_true', target='trainer;use_cosine'),
     ]
     config = ConfigParser.from_args(args, options)
-    assert config['method'] in ['DKD', 'MiB','PLOP'], "Only DKD and MiB are supported"
-    assert config['method'] in config['name'], f"Name should contain the method name, {config['method']} in {config['name']}"
+    assert config['method'] in ['DKD', 'MiB','PLOP','base'], "Only DKD and MiB are supported"
+    assert config['method'] in config['name'], f'Name should contain the method name, {config["method"]} in {config["name"]}'
+    # if config['trainer']['use_cosine'] is True:
+    #     config['name'] += '_cosineClf'
     main(config)

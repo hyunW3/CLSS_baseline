@@ -13,6 +13,7 @@ from models.loss_method import loss_DKD, loss_MiB, loss_PLOP
 import wandb
 import numpy as np
 from utils import entropy
+import gc
 
 class Trainer_base(BaseTrainer):
     """
@@ -86,6 +87,8 @@ class Trainer_base(BaseTrainer):
             self.loss_name = ['loss', 'loss_CE', 'loss_KD']
         elif self.config['method'] == 'PLOP':
             self.loss_name = ['loss', 'loss_CE', 'loss_POD']
+        elif self.config['method'] == 'base':
+            self.loss_name = ['loss', 'loss_mbce']
         else :
             raise NotImplementedError(self.config['method'])
         self.train_metrics = MetricTracker(
@@ -106,6 +109,9 @@ class Trainer_base(BaseTrainer):
             self.CEloss = UnbiasedCrossEntropy(old_cl=self.n_old_classes, ignore_index=255, reduction='none')
         elif self.config['method'] == 'PLOP':
             self.CEloss = nn.CrossEntropyLoss(ignore_index=255,reduction='none')
+        elif self.config['method'] == 'base':
+            pos_weight = torch.ones([len(self.task_info['new_class'])], device=self.device) * self.config['hyperparameter']['pos_weight']
+            self.BCELoss = WBCELoss(pos_weight=None, n_old_classes=self.n_old_classes + 1, n_new_classes=self.n_new_classes)
         else :
             raise NotImplementedError(self.config['method'])
 
@@ -119,6 +125,9 @@ class Trainer_base(BaseTrainer):
             self.logger.info(f"Total loss = L_UnCE + {self.config['hyperparameter']['kd']}")
         elif self.config['method'] == 'PLOP':
             self.logger.info(f"Total loss = L_CE")
+        elif self.config['method'] == 'base':
+            self.logger.info(f"pos_weight - {self.config['hyperparameter']['pos_weight']}")
+            self.logger.info(f"Total loss = {self.config['hyperparameter']['mbce']} * L_mbce")
         else :
             raise NotImplementedError(self.config['method'])
     def _train_epoch(self, epoch):
@@ -163,8 +172,13 @@ class Trainer_base(BaseTrainer):
                                      self.n_old_classes, self.n_new_classes, 
                                      self.CEloss)
                     loss = loss_CE
+                elif self.config['method'] == 'base':
+                    loss_mbce = self.BCELoss(logit[:,-self.n_new_classes:], data['label']).mean(dim=[0, 2, 3])
+                    loss = self.config['hyperparameter']['mbce'] * loss_mbce.sum()
                 else:
                     raise NotImplementedError(self.config['method'])
+                
+                gc.collect()
             self.scaler.scale(loss).backward()
             self.scaler.step(self.optimizer)
             self.scaler.update()
@@ -178,6 +192,8 @@ class Trainer_base(BaseTrainer):
                 self.train_metrics.update('loss_ac', loss_ac.mean().item())
             elif self.config['method'] == 'MiB' or self.config['method'] == 'PLOP':
                 self.train_metrics.update('loss_CE', loss_CE.mean().item())
+            elif self.config['method'] == 'base':
+                self.train_metrics.update('loss_mbce', loss_mbce.mean().item())
             else :
                 raise NotImplementedError(self.config['method'])
             # Get First lr
@@ -226,6 +242,8 @@ class Trainer_base(BaseTrainer):
                     idx = idx.sum(dim=1)  # logit: [N, H, W]
                     pred[idx == 0] = 0  # set background (non-target class)
                 elif self.config['method'] == 'MiB' or self.config['method'] == 'PLOP':
+                    _, pred = logit.max(dim=1)
+                elif self.config['method'] == 'base':
                     _, pred = logit.max(dim=1)
                 else :
                     raise NotImplementedError(self.config['method'])
@@ -316,6 +334,8 @@ class Trainer_base(BaseTrainer):
                     pred[idx == 0] = 0  # set background (non-target class)
                 # elif 'MIB' or 'PLOP'
                 elif self.config['method'] == 'MiB' or self.config['method'] == 'PLOP':
+                    _, pred = logit.max(dim=1)
+                elif self.config['method'] == 'base':
                     _, pred = logit.max(dim=1)
                 else:
                     raise NotImplementedError(self.config['method'])
@@ -413,6 +433,8 @@ class Trainer_incremental(Trainer_base):
             self.loss_name = ['loss', 'loss_CE', 'loss_KD']
         elif self.config['method'] == 'PLOP':
             self.loss_name = ['loss', 'loss_CE', 'loss_POD']
+        elif self.config['method'] == 'base':
+            self.loss_name = ['loss', 'loss_mbce']
         else :
             raise NotImplementedError(self.config['method'])
         self.train_metrics = MetricTracker(
@@ -428,6 +450,8 @@ class Trainer_incremental(Trainer_base):
             self.KDLoss = UnbiasedKnowledgeDistillationLoss(alpha=self.config['hyperparameter']['alpha'])
         elif self.config['method'] == 'PLOP':
             self.PodLoss = features_distillation
+        elif self.config['method'] == 'base':
+            pass
         else :
             raise NotImplementedError(self.config['method'])
 
@@ -441,6 +465,9 @@ class Trainer_incremental(Trainer_base):
             self.logger.info(f"Total loss = L_UnCE + {self.config['hyperparameter']['kd']} * L_UnKD (alpha : {self.config['hyperparameter']['alpha']})")
         elif self.config['method'] == 'PLOP':
             self.logger.info(f"Total loss = L_CE + POD_loss")
+        elif self.config['method'] == 'base':
+            self.logger.info(f"pos_weight - {self.config['hyperparameter']['pos_weight']}")
+            self.logger.info(f"Total loss = {self.config['hyperparameter']['mbce']} * L_mbce")
         else :
             raise NotImplementedError(self.config['method'])
     def _before_train(self):
@@ -511,7 +538,8 @@ class Trainer_incremental(Trainer_base):
                     mask_background = labels < self.n_old_classes
                     # self.pseudo_labeling == "entropy":
                     probs = torch.softmax(logit_old, dim=1)
-                    max_probs, pseudo_labels = probs.max(dim=1)
+                    # max_probs, pseudo_labels = probs.max(dim=1)
+                    _, pseudo_labels = probs.max(dim=1)
                     mask_valid_pseudo = (entropy(probs) /
                                          self.max_entropy) < self.thresholds[pseudo_labels]
                     ############
@@ -519,6 +547,7 @@ class Trainer_incremental(Trainer_base):
                     labels[~mask_valid_pseudo & mask_background] = 255
                     labels[mask_valid_pseudo & mask_background] = pseudo_labels[mask_valid_pseudo &
                                                                                         mask_background]
+                    del probs, pseudo_labels
                     ############
                     # Number of old/bg pixels that are certain
                     num = (mask_valid_pseudo & mask_background).float().sum(dim=(1,2))
@@ -529,8 +558,7 @@ class Trainer_incremental(Trainer_base):
                     # giving too much importance to new pixels
                     classif_adaptive_factor = num / (den + 1e-6)
                     classif_adaptive_factor = classif_adaptive_factor[:, None, None]
-
-                    # features has key? -  dict_keys(['body', 'pre_logits', 'attentions', 'sem_logits_small'])
+                    del num, den
                     # pos_neg
                     attentions_old = features_old["attentions"]
                     attentions = features["attentions"]
@@ -544,7 +572,9 @@ class Trainer_incremental(Trainer_base):
                                          classif_adaptive_factor)
                     loss_CE, loss_POD = loss_out
                     loss = loss_CE + loss_POD
-                    
+                elif self.config['method'] == 'base':
+                    loss_mbce = self.BCELoss(logit[:,-self.n_new_classes:], data['label']).mean(dim=[0, 2, 3])
+                    loss = self.config['hyperparameter']['mbce'] * loss_mbce.sum()
                 else :
                     raise NotImplementedError(self.config['method'])
                 
@@ -563,7 +593,9 @@ class Trainer_incremental(Trainer_base):
                     concat_img = np.concatenate((img, pred,pred_old, label), axis=2).transpose(1,2,0)  # concat along width, then make H,W,C
 
                     self.logger.log_wandb({'train/image' : [wandb.Image(concat_img, caption=f'input,pred,pred_old,label')]},step=epoch)
+                    del concat_img, img, pred, pred_old, label
                     wandb_log_done = True
+                gc.collect()
             self.scaler.scale(loss).backward()
             self.scaler.step(self.optimizer)
             self.scaler.update()
@@ -582,6 +614,8 @@ class Trainer_incremental(Trainer_base):
             elif self.config['method'] == 'PLOP':
                 self.train_metrics.update('loss_CE', loss_CE.mean().item())
                 self.train_metrics.update('loss_POD', loss_POD.mean().item())
+            elif self.config['method'] == 'base':
+                self.train_metrics.update('loss_mbce', loss_mbce.mean().item())
             else :
                 raise NotImplementedError(self.config['method'])
             # Get First lr
