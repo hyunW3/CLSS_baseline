@@ -8,6 +8,7 @@
 - CUDA 11.1
 - python 3.8
 - The shell code for setting environment is in `scripts/env_create.sh`
+- Or, `conda env create -f env.yaml` (Recommended)
 
 ## training
 - The shell code for training is in `./z_exp_individual_cmd`
@@ -15,6 +16,7 @@
     ./train_{dataset}_{scenarios}_{method}.sh
     For examples, ./train_voc_10-1_DKD.sh
     For MiB, PLOP which require 2 GPUs, please pass the argument GPU_NUMBER (ex 0,1) to .sh file
+    For example, ./train_voc_10-1_MiB.sh 0,1
 ```
 - The configuration for each method is in 'configs/config_{dataset}_{method}.yaml'
 - The results are updated in wandb 
