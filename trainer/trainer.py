@@ -7,6 +7,7 @@ from torch.nn.parallel import DistributedDataParallel as DDP
 from base import BaseTrainer
 from utils import MetricTracker, MetricTracker_scalars
 from models.loss import WBCELoss, KDLoss, ACLoss, UnbiasedCrossEntropy, UnbiasedKnowledgeDistillationLoss, features_distillation
+from models.loss import BCELoss, OCFM_loss
 from data_loader import VOC
 from data_loader import ADE
 from models.loss_method import loss_DKD, loss_MiB, loss_PLOP
@@ -88,7 +89,9 @@ class Trainer_base(BaseTrainer):
         elif self.config['method'] == 'PLOP':
             self.loss_name = ['loss', 'loss_CE', 'loss_POD']
         elif self.config['method'] == 'base':
-            self.loss_name = ['loss', 'loss_mbce']
+            self.loss_name = ['loss', f"loss_{self.config['trainer']['main_loss'].lower()}"]
+            if self.config['trainer']['OCFM'] is True:
+                self.loss_name.append('loss_OCFM')
         else :
             raise NotImplementedError(self.config['method'])
         self.train_metrics = MetricTracker(
@@ -110,8 +113,18 @@ class Trainer_base(BaseTrainer):
         elif self.config['method'] == 'PLOP':
             self.CEloss = nn.CrossEntropyLoss(ignore_index=255,reduction='none')
         elif self.config['method'] == 'base':
-            pos_weight = torch.ones([len(self.task_info['new_class'])], device=self.device) * self.config['hyperparameter']['pos_weight']
-            self.BCELoss = WBCELoss(pos_weight=None, n_old_classes=self.n_old_classes + 1, n_new_classes=self.n_new_classes)
+            
+            if self.config['trainer']['main_loss'] == 'MBCE':
+                pos_weight = torch.ones([len(self.task_info['new_class'])], device=self.device) * self.config['hyperparameter']['pos_weight']
+                # self.main_loss = WBCELoss(pos_weight=pos_weight, n_old_classes=self.n_old_classes + 1, ignore_bg=False, n_new_classes=self.n_new_classes)
+                self.main_loss = WBCELoss(pos_weight=None, n_old_classes=self.n_old_classes+1, ignore_bg=True, n_new_classes=self.n_new_classes)
+            elif self.config['trainer']['main_loss'] == 'BCE':
+                pos_weight = torch.ones([len(self.task_info['new_class'])+1], device=self.device) * self.config['hyperparameter']['pos_weight']
+                self.main_loss = nn.BCEWithLogitsLoss(pos_weight=pos_weight, reduction='none')
+            elif self.config['trainer']['main_loss'] == 'CE':
+                self.main_loss = nn.CrossEntropyLoss(ignore_index=255,reduction='none')
+            else:
+                raise NotImplementedError(self.config['trainer']['main_loss'])
         else :
             raise NotImplementedError(self.config['method'])
 
@@ -127,7 +140,10 @@ class Trainer_base(BaseTrainer):
             self.logger.info(f"Total loss = L_CE")
         elif self.config['method'] == 'base':
             self.logger.info(f"pos_weight - {self.config['hyperparameter']['pos_weight']}")
-            self.logger.info(f"Total loss = {self.config['hyperparameter']['mbce']} * L_mbce")
+            self.logger.info(f"Total loss = {self.config['hyperparameter'][self.config['trainer']['main_loss'].lower()]} * L_{self.config['trainer']['main_loss'].lower()}")
+            if self.config['trainer']['OCFM'] is True:
+                self.logger.info(f"             {self.config['hyperparameter']['ocfm']} * L_ocfm")
+        
         else :
             raise NotImplementedError(self.config['method'])
     def _train_epoch(self, epoch):
@@ -155,6 +171,7 @@ class Trainer_base(BaseTrainer):
         for batch_idx, data in enumerate(self.train_loader):
             data['image'], data['label'] = data['image'].to(self.device), data['label'].to(self.device)
             # print(data['image'].shape, data['label'].shape) # torch.Size([6, 3, 512, 512]) torch.Size([6, 512, 512])
+            labels = data['label'].type(torch.long)
             with torch.cuda.amp.autocast(enabled=self.config['use_amp']):
                 logit, features = self.model(data['image'], ret_intermediate=False)
                 if self.config['method'] == 'DKD':    
@@ -173,8 +190,21 @@ class Trainer_base(BaseTrainer):
                                      self.CEloss)
                     loss = loss_CE
                 elif self.config['method'] == 'base':
-                    loss_mbce = self.BCELoss(logit[:,-self.n_new_classes:], data['label']).mean(dim=[0, 2, 3])
-                    loss = self.config['hyperparameter']['mbce'] * loss_mbce.sum()
+                    # MBCE, BCE, CE
+                    if self.config['trainer']['main_loss'] == 'BCE':
+                        N, C, H, W = logit.shape
+
+                        target = torch.zeros_like(logit, device=logit.device).float()
+                        for cls_idx in labels.unique():
+                            if cls_idx in [255]:
+                                continue
+                            target[:, int(cls_idx) - self.n_old_classes] = (labels == int(cls_idx)).float()
+                        logit = logit.permute(0, 2, 3, 1).reshape(-1, C)
+                        target = target.reshape(-1,C)
+                        labels = target
+                    main_loss = self.main_loss(logit, labels).mean()#dim=[0, 2, 3])
+                    
+                    loss = self.config['hyperparameter'][self.config['trainer']['main_loss'].lower()] * main_loss
                 else:
                     raise NotImplementedError(self.config['method'])
                 
@@ -193,7 +223,7 @@ class Trainer_base(BaseTrainer):
             elif self.config['method'] == 'MiB' or self.config['method'] == 'PLOP':
                 self.train_metrics.update('loss_CE', loss_CE.mean().item())
             elif self.config['method'] == 'base':
-                self.train_metrics.update('loss_mbce', loss_mbce.mean().item())
+                self.train_metrics.update(f"loss_{self.config['trainer']['main_loss'].lower()}", main_loss.mean().item())
             else :
                 raise NotImplementedError(self.config['method'])
             # Get First lr
@@ -290,14 +320,14 @@ class Trainer_base(BaseTrainer):
             # log.update({met.__name__ + '_confusion_matrix': met().confusion_matrix})
         wandb_log = {}
         for key, value in log.items():
-            if 'by_class' not in key:
+            if 'by_class' not in key and self.config['no_wandb'] is False:
                 wandb_log.update({f"val/{key}": float(value)})
             # if 'confusion_matrix' in key: # TODO : not ready
             #     wandb_log.update({f"val/{key}": wandb.plot.confusion_matrix(probs=None,
             #                                                                 y_true=value.sum(axis=1),
             #                                                                 preds=value.sum(axis=0),
             #                                                                 class_names=VOC)})
-            else :
+            elif self.config['no_wandb'] is False:
                 by_class = []
                 for s in value.split("\n"):
                     if s == '':
@@ -343,8 +373,10 @@ class Trainer_base(BaseTrainer):
                 self.evaluator_test.add_batch(target, pred)
 
                 labels = data['label'].type(torch.long)
-                if (batch_idx == len(self.test_loader) -1 and wandb_log_done is False) or \
-                    wandb_log_done is False and ( any([lbl in torch.unique(labels) for lbl in self.task_info['new_class']]) ) :
+                if  self.config['no_wandb'] is False and (
+                    (batch_idx == len(self.test_loader) -1 and wandb_log_done is False) or \
+                    wandb_log_done is False and ( any([lbl in torch.unique(labels) for lbl in self.task_info['new_class']]) ) 
+                ):
                     
                     img = (self.denorm(data['image'][0].detach().cpu().numpy()) * 255).astype(np.uint8).transpose(1,2,0)
                     pred = self.label2color(pred[0]).astype(np.uint8)
@@ -384,9 +416,9 @@ class Trainer_base(BaseTrainer):
         
         wandb_log = {}
         for key, value in log.items():
-            if 'by_class' not in key:
+            if 'by_class' not in key and self.config['no_wandb'] is False:
                 wandb_log.update({f"test/{key}": float(value)})
-            else :
+            elif self.config['no_wandb'] is False:
                 by_class = []
                 for s in value.split("\n"):
                     if s == '':
@@ -394,8 +426,8 @@ class Trainer_base(BaseTrainer):
                     idx, name, val = [i for i in s.split(" ") if i != '']
                     by_class.append([int(idx), name, float(val)])
                 wandb_log.update({f"test/{key}": wandb.Table(data=by_class, columns=["idx", "name", "value"])})
-                    
-        self.logger.log_wandb(wandb_log,step=epoch)
+        if self.config['no_wandb'] is False:
+            self.logger.log_wandb(wandb_log,step=epoch)
         return log
 
 
@@ -404,7 +436,7 @@ class Trainer_incremental(Trainer_base):
     Trainer class for incremental steps
     """
     def __init__(
-        self, model, model_old, optimizer, evaluator, config, task_info,
+          self, model, model_old, optimizer, evaluator, config, task_info,
         data_loader, lr_scheduler=None, logger=None, gpu=None
     ):
         super().__init__(
@@ -434,9 +466,12 @@ class Trainer_incremental(Trainer_base):
         elif self.config['method'] == 'PLOP':
             self.loss_name = ['loss', 'loss_CE', 'loss_POD']
         elif self.config['method'] == 'base':
-            self.loss_name = ['loss', 'loss_mbce']
+            self.loss_name = ['loss', f"loss_{self.config['trainer']['main_loss'].lower()}"]
+            if self.config['trainer']['OCFM'] is True:
+                self.loss_name.append('loss_ocfm')
         else :
             raise NotImplementedError(self.config['method'])
+        
         self.train_metrics = MetricTracker(
             keys=self.loss_name,
             writer=self.writer, colums=['total', 'counts', 'average'],
@@ -451,6 +486,8 @@ class Trainer_incremental(Trainer_base):
         elif self.config['method'] == 'PLOP':
             self.PodLoss = features_distillation
         elif self.config['method'] == 'base':
+            if self.config['trainer']['OCFM'] is True:
+                self.OCFM_loss = OCFM_loss()
             pass
         else :
             raise NotImplementedError(self.config['method'])
@@ -467,7 +504,9 @@ class Trainer_incremental(Trainer_base):
             self.logger.info(f"Total loss = L_CE + POD_loss")
         elif self.config['method'] == 'base':
             self.logger.info(f"pos_weight - {self.config['hyperparameter']['pos_weight']}")
-            self.logger.info(f"Total loss = {self.config['hyperparameter']['mbce']} * L_mbce")
+            self.logger.info(f"Total loss = {self.config['hyperparameter'][self.config['trainer']['main_loss'].lower()]} * L_{self.config['trainer']['main_loss'].lower()}")
+            if self.config['trainer']['OCFM'] is True:
+                self.logger.info(f"           + {self.config['hyperparameter']['ocfm']} * L_ocfm")
         else :
             raise NotImplementedError(self.config['method'])
     def _before_train(self):
@@ -511,7 +550,7 @@ class Trainer_incremental(Trainer_base):
         for batch_idx, data in enumerate(self.train_loader):
             self.optimizer.zero_grad(set_to_none=True)
             data['image'], data['label'] = data['image'].to(self.device), data['label'].to(self.device)
-            labels = data['label'].type(torch.long)
+            
             with torch.cuda.amp.autocast(enabled=self.config['use_amp']):
                 logit, features = self.model(data['image'], ret_intermediate=True)
 
@@ -531,7 +570,7 @@ class Trainer_incremental(Trainer_base):
                     loss_CE, loss_KD = loss_out
                     loss = loss_CE + self.config['hyperparameter']['kd'] * loss_KD
                 elif self.config['method'] == 'PLOP':
-                    
+                    labels = data['label'].type(torch.long)
                     ############
                     # psuedo labeling
                     # original_labels = labels.clone()
@@ -573,13 +612,74 @@ class Trainer_incremental(Trainer_base):
                     loss_CE, loss_POD = loss_out
                     loss = loss_CE + loss_POD
                 elif self.config['method'] == 'base':
-                    loss_mbce = self.BCELoss(logit[:,-self.n_new_classes:], data['label']).mean(dim=[0, 2, 3])
-                    loss = self.config['hyperparameter']['mbce'] * loss_mbce.sum()
+                    labels = data['label'].type(torch.long)
+                    if (self.config['trainer']['pseudo_label'] is True or 
+                            self.config['trainer']['OCFM'] is True) and \
+                        self.model_old is not None:
+
+                        logit_old = torch.sigmoid(logit_old)
+                        pred = logit_old.argmax(dim=1) + 1  # pred: [N. H, W]
+                        idx = (logit_old > 0.5).float()  # logit: [N, C, H, W]
+                        idx = idx.sum(dim=1)  # logit: [N, H, W]
+                        pred[idx == 0] = 0  # set background (non-target class)
+                        pseudo_label_region = torch.logical_and(
+                            data['label'] == 0, pred > 0
+                        ).unsqueeze(1)
+                        data['label'] = torch.where(
+                            pseudo_label_region[:,0,:,:], pred.to(torch.uint8), data['label']
+                        )
+                        labels = data['label'].type(torch.long)
+                    
+                    main_loss = None
+                    if self.config['trainer']['main_loss'] == 'MBCE' or self.config['trainer']['main_loss'] == 'BCE':
+                        logits_for_loss = logit[:, -self.n_new_classes:]
+                        if self.config['trainer']['pseudo_label'] is True:
+                            logits_for_loss = logit
+                        # main_loss = self.main_loss(
+                        #         logits_for_loss,  # [N, |Ct|, H, W]
+                        #         labels,                # [N, H, W]
+                        #     ).mean()#dim=[0, 2, 3])  # [|Ct|]
+                    elif self.config['trainer']['main_loss'] == 'BCE':
+                        N, C, H, W = logit.shape
+                        target = torch.zeros_like(logit, device=logit.device).float()
+                        for cls_idx in labels.unique():
+                            if cls_idx in [255]:
+                                continue
+                            target[:, int(cls_idx) - self.n_old_classes] = (labels == int(cls_idx)).float()
+                        logits_for_loss = logit.permute(0, 2, 3, 1).reshape(-1, C)
+                        labels = labels.reshape(-1,C)
+                        labels = target
+                    else:
+                        raise NotImplementedError(self.config['trainer']['main_loss'])
+                    main_loss = self.main_loss(logits_for_loss, labels).mean()#dim=[0, 2, 3])
+                    loss_out = [main_loss]
+
+                    if self.config['trainer']['OCFM'] is True:
+                        features = features['attentions']
+                        features_old = features_old['attentions']
+                        if torch.equal(pseudo_label_region,torch.zeros_like(pseudo_label_region,dtype=torch.bool) ):
+                            loss_ocfm = torch.Tensor([0]).to(self.device)
+                        else:
+                            loss_ocfm = self.OCFM_loss(features, features_old, pseudo_label_region.to(torch.float32))
+                        # loss = self.config['hyperparameter']['mbce'] * loss_mbce.sum() + self.config['hyperparameter']['ocfm'] * loss_ocfm.sum()
+                        loss_out.append(loss_ocfm)  
+                    # sum all component 
+                    loss = self.config['hyperparameter'][self.config['trainer']['main_loss'].lower()] * main_loss.sum()
+                    
+                    
+                    for key in self.loss_name[1:]:
+                        if key == f"loss_{self.config['trainer']['main_loss'].lower()}":
+                            continue
+                        value = loss_out[self.loss_name.index(key)-1].sum()
+                        loss += self.config['hyperparameter'][key.split("_")[1].lower()] * value
+                    loss_out = [loss] + loss_out    
                 else :
                     raise NotImplementedError(self.config['method'])
-                
-                if (batch_idx == len(self.train_loader) -1 and wandb_log_done is False) or \
-                    wandb_log_done is False and ( any([lbl in torch.unique(labels) for lbl in self.task_info['new_class']]) ) :
+                if self.config['no_wandb'] is False and (
+                        (batch_idx == len(self.train_loader) -1 and wandb_log_done is False) or \
+                        wandb_log_done is False and ( any([lbl in torch.unique(labels) for lbl in self.task_info['new_class']]) )
+                    ):
+                    
                     loss_dict = {'loss': loss.item()}
                     for key in self.loss_name[1:]:
                         loss_dict.update({key: loss_out[self.loss_name.index(key)-1].mean().item()})
@@ -615,7 +715,9 @@ class Trainer_incremental(Trainer_base):
                 self.train_metrics.update('loss_CE', loss_CE.mean().item())
                 self.train_metrics.update('loss_POD', loss_POD.mean().item())
             elif self.config['method'] == 'base':
-                self.train_metrics.update('loss_mbce', loss_mbce.mean().item())
+                self.train_metrics.update(f"loss_{self.config['trainer']['main_loss'].lower()}", main_loss.mean().item())
+                if self.config['trainer']['OCFM'] is True:
+                    self.train_metrics.update('loss_ocfm', loss_ocfm.mean().item())
             else :
                 raise NotImplementedError(self.config['method'])
             # Get First lr

@@ -36,7 +36,7 @@ class DeepLabV3(nn.Module):
         self.classes = classes
         # self.tot_classes = reduce(lambda a, b: a + b, self.classes)
         self.use_cosine = use_cosine
-        use_bias = not use_cosine
+        self.use_bias = not use_cosine
 
         # Network
         self.backbone = ResNet101(norm, norm_act, output_stride, backbone_pretrained)
@@ -46,16 +46,14 @@ class DeepLabV3(nn.Module):
         # if method = 'MiB
         # cls[0] : background classifier
         # classes = [5,3,3,3] for 5-3 step 4
-        self.cls = nn.ModuleList([nn.Conv2d(256, c, kernel_size=1, bias=use_bias) for c in [1] + classes])  
+        self.cls = nn.ModuleList([nn.Conv2d(256, c, kernel_size=1, bias=self.use_bias) for c in [1] + classes])  
         
         
         self._init_classifier()
 
-    def forward(self, x, ret_intermediate=False,return_x_b=False):
+    def forward(self, x, ret_intermediate=False,):
         out_size = x.shape[-2:]  # spatial size
-        # x_b, x_pl, attentions = self.forward_before_class_prediction(x)
-        # del x_b
-        x_pl, attentions = self.forward_before_class_prediction(x,return_x_b)
+        x_b, x_pl, attentions = self.forward_before_class_prediction(x)
         sem_logits_small = self.forward_class_prediction(x_pl,use_cosine=self.use_cosine)
         
     
@@ -78,27 +76,27 @@ class DeepLabV3(nn.Module):
                 "sem_logits_small": sem_logits_small
             }
             elif self.method == 'base':
-                return sem_logits, {}
+                return sem_logits, {
+                    "attentions" : attentions + [x_b,x_pl],
+                }
             else :
                 raise NotImplementedError(f"Not implemented method, {self.method}")
         else:
             return sem_logits, {}
 
-    def forward_before_class_prediction(self, x,return_x_b=False):
+    def forward_before_class_prediction(self, x):
         x_b, attentions = self.backbone(x)
         x_pl = self.aspp(x_b)
-        if return_x_b:
-            return x_b, x_pl, attentions
-        else:
-            return x_pl, attentions
+        return x_b, x_pl, attentions
 
     def forward_class_prediction(self, x_pl,use_cosine=False):
         # x_pl dimension?
         out = []
-        
+        if use_cosine:
+            x_pl = F.normalize(x_pl, dim=1, p=2)
         for i, mod in enumerate(self.cls):
             if use_cosine:
-                w = F.normalize(mod.weight, dim=1,p=2)  # [|C|, c]
+                w = F.normalize(mod.weight, dim=1,p=2)  # [|C_t|, c,1,1] (c=256)
                 mod = lambda x: F.conv2d(x, w)
             else:
                 mod = mod
@@ -152,18 +150,22 @@ class DeepLabV3(nn.Module):
             # Initialize novel classifiers using an auxiliary classifier
             for i in range(self.classes[-1]):
                 cls.weight[i:i + 1].data.copy_(self.cls[0].weight)
-                cls.bias[i:i + 1].data.copy_(self.cls[0].bias)
+                if not self.use_cosine:
+                    cls.bias[i:i + 1].data.copy_(self.cls[0].bias)
         elif self.method == 'MiB' or self.method == 'PLOP':
             # Initialize novel classifiers using a background classifier
             # As MiB code implemented
-            bias_diff = torch.log(torch.FloatTensor([self.classes[-1]+1]))
-            new_bias = self.cls[0].bias.data - bias_diff
+            if not self.use_cosine:
+                bias_diff = torch.log(torch.FloatTensor([self.classes[-1]+1]))
+                new_bias = self.cls[0].bias.data - bias_diff
             for i in range(self.classes[-1]):
                 cls.weight[i:i+1].data.copy_(self.cls[0].weight)
-                cls.bias[i:i+1].data.copy_(new_bias)    
+                if not self.use_cosine:
+                    cls.bias[i:i+1].data.copy_(new_bias)    
             # set the bias of background classifier same weight as the last class
-            self.cls[0].bias[0].data.copy_(new_bias.squeeze(0))
-            print("Bg classifier bias[0] updated")
+            if not self.use_cosine:
+                self.cls[0].bias[0].data.copy_(new_bias.squeeze(0))
+                print("Bg classifier bias[0] updated")
             # print("No bg classifier updated")
         elif self.method == 'base':
             pass

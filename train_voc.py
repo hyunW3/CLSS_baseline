@@ -19,6 +19,7 @@ from utils.parse_config import ConfigParser
 from logger.logger import Logger
 from utils.memory import memory_sampling_balanced
 
+import sys
 import traceback
 
 torch.backends.cudnn.benchmark = True
@@ -47,9 +48,10 @@ def main_worker(gpu, ngpus_per_node, config):
     # Set looging
     rank = dist.get_rank()
     logger = Logger(config.log_dir, rank=rank)
-    logger.set_wandb(config)
+    if config['no_wandb'] is False:
+        logger.set_wandb(config)
+        logger.saveconfig_wandb(config)
     logger.set_logger(f'train(rank{rank})', verbosity=2)
-    logger.saveconfig_wandb(config)
     # fix random seeds for reproduce
     SEED = config['seed']
     torch.manual_seed(SEED)
@@ -58,6 +60,8 @@ def main_worker(gpu, ngpus_per_node, config):
     np.random.seed(SEED)
     random.seed(SEED)
     # newly added
+    logger.info(f"Comment :\n{sys.argv}")
+    logger.info(f"{config['name']}")
     logger.info(f"SEED: {SEED}, determinisitc {config['set_deterministic']}")
     if config['set_deterministic'] is True:
         logger.info('** Set deterministic **')
@@ -230,7 +234,7 @@ def main_worker(gpu, ngpus_per_node, config):
     except Exception as e:
         logger.error(f"Exception: {e}")
         logger.error(traceback.format_exc())
-        logger.exception(e)
+        sys.exit(1)
 
 
 if __name__ == '__main__':
@@ -268,12 +272,26 @@ if __name__ == '__main__':
         CustomArgs(['--ac'], type=float, target='hyperparameter;ac'),
         CustomArgs(['--freeze_bn'], action='store_true', target='arch;args;freeze_all_bn'),
         CustomArgs(['--test'], action='store_true', target='test'),
+        CustomArgs(['--no_wandb'], action='store_true', target='no_wandb'),
 
         CustomArgs(['--use_cosine'], action='store_true', target='trainer;use_cosine'),
+        CustomArgs(['--main_loss'], type=str, target='trainer;main_loss'), # 'CE' or 'WBCE'
+        CustomArgs(['--OCFM'], action='store_true', target='trainer;OCFM'),
+        CustomArgs(['--pseudo_label'], action='store_true', target='trainer;pseudo_label'),
     ]
     config = ConfigParser.from_args(args, options)
     assert config['method'] in ['DKD', 'MiB','PLOP','base'], "Only DKD and MiB are supported"
     assert config['method'] in config['name'], f'Name should contain the method name, {config["method"]} in {config["name"]}'
-    # if config['trainer']['use_cosine'] is True:
-    #     config['name'] += '_cosineClf'
+    if config['method'] == 'base':
+        assert config['trainer']['main_loss'] in ['MBCE', 'BCE', 'CE'], "Only ce and mbce are supported"
+
+    if config['trainer']['OCFM'] is True:
+        config['trainer']['pseudo_label'] = True
+    # if config['method'] == 'base':
+    #     if config['trainer']['OCFM'] is True:
+    #         config['name'] = f"{config['name']}_OCFM"
+    #     if config['trainer']['use_cosine'] is True:
+    #         config['name'] = f"{config['name']}_cosine"
+    #     if config['trainer']['pseudo_label'] is True:
+    #         config['name'] = f"{config['name']}_pseudolbl"
     main(config)

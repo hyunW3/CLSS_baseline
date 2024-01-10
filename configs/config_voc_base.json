@@ -76,7 +76,10 @@
     },
     "hyperparameter": {
         "pos_weight": 1,
-        "mbce": 1
+        "ce": 1,
+        "mbce" : 1,
+        "bce" : 1,
+        "ocfm" : 10000
     },
     "lr_scheduler": {
         "type": "PolyLR",

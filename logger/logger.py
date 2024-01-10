@@ -29,13 +29,15 @@ class Logger:
         if self.rank == 0:
             project_name = "CLSS"
             if config['method'] == "base":
-                project_name = "CLSS_new-method"
+                project_name = "CLSS_E1_jan2nd"
+                if config['trainer']['OCFM'] is True:
+                    project_name = "CLSS_E2"
                 self.wandb = wandb.init(
                     project=project_name,
                     tags=["finetune", config['method'],f"use_cosine{config['trainer']['use_cosine']}"],
                 )
             self.wandb = wandb.init(
-                project="CLSS",
+                project="CLSS_baseline_additional",
                 tags=[config['method']],
             )
             method = f"_{config['name']}" if config['method'] not in  config['name'] else ""
@@ -57,8 +59,7 @@ class Logger:
             self.logger.info(msg)
 
     def error(self, msg):
-        if self.rank == 0:
-            self.logger.error(msg)
+        self.logger.error(msg)
 
     def warning(self, msg):
         if self.rank == 0:
