@@ -8,6 +8,7 @@ GPU=$1
 BS=12  # Total 24
 SAVEDIR='saved_voc'
 
+shift 1 # remove $1 (GPU)
 OPTION=$@ # --set_deterministic
 TASKSETTING='overlap'  # or 'disjoint'
 TASKNAME='15-1'
@@ -19,7 +20,7 @@ shift 1 # remove $1 (GPU)
 OPTION=$@ # --set_deterministic
 # INIT_POSWEIGHT=2
 MEMORY_SIZE=0  # 100 for DKD-M
-
+NAME='MiB'
 # check deterministic string exist in OPTION 
 if [[ $OPTION == *"--set_deterministic"* ]]; then
     echo "deterministic version"

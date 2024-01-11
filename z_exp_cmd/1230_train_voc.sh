@@ -44,5 +44,11 @@ cd ../z_exp_individual_cmd
 
 # 0104 
 ./train_voc_15-1_DKD.sh
+# ./train_voc_15-1_MiB.sh 0,1 &
+# ./train_voc_15-1_PLOP.sh 2,3
+# ./train_voc_10-1_MiB.sh 0,1 &
+# ./train_voc_5-3_PLOP.sh 2,3
+
+alert_knock echo "1230_train_voc.sh finished"
 
 

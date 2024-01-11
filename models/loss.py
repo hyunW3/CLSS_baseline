@@ -57,9 +57,10 @@ class BCELoss(nn.Module):
 
 
 class WBCELoss(nn.Module):
-    def __init__(self, ignore_index=255, pos_weight=None, reduction='none', n_old_classes=0, n_new_classes=0):
+    def __init__(self, ignore_index=255, pos_weight=None, ignore_bg=True, reduction='none', n_old_classes=0, n_new_classes=0):
         super().__init__()
         self.ignore_index = ignore_index
+        self.ignore_list = [0, self.ignore_index] if ignore_bg else [self.ignore_index]
         self.n_old_classes = n_old_classes  # |C0:t-1| + 1(bg), 19-1: 20 | 15-5: 16 | 15-1: 16...
         self.n_new_classes = n_new_classes  # |Ct|, 19-1: 1 | 15-5: 5 | 15-1: 1
         
@@ -73,7 +74,7 @@ class WBCELoss(nn.Module):
         N, C, H, W = logit.shape
         target = torch.zeros_like(logit, device=logit.device).float()
         for cls_idx in label.unique():
-            if cls_idx in [0, self.ignore_index]:
+            if cls_idx in self.ignore_list:
                 continue
             target[:, int(cls_idx) - self.n_old_classes] = (label == int(cls_idx)).float()
         
@@ -375,3 +376,48 @@ def _local_pod(x, spp_scales=[1, 2, 4], normalize=False, normalize_per_scale=Fal
                 emb.append(vertical_pool)
 
     return torch.cat(emb, dim=1)
+
+## STAR (Saving 100x Storage Prototype Replay for Reconstructing Training Sample Distribution in Class-Incremental Semantic Segmentation
+# Old-class features maintaining loss
+class OCFM_loss(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.criterion = nn.MSELoss(reduction='none')
+
+    def forward(self, features, features_old, pseudo_label_region):
+
+        pseudo_label_region_5 = F.interpolate(
+            pseudo_label_region, size=features[2].shape[2:], mode="bilinear", align_corners=False)
+
+        loss_5 = self.criterion(features[5], features_old[5])
+        eps = 1e-18
+        loss_5 = (loss_5 * pseudo_label_region_5).sum() / (eps+pseudo_label_region_5.sum() * features[5].shape[1])
+
+        return loss_5
+# Similarity-aware discriminative loss
+class ContLoss(nn.Module):
+    def __init__(self, ignore_index=255, n_old_classes=0, n_new_classes=0):
+        super().__init__()
+        self.ignore_index = ignore_index
+        self.n_old_classes = n_old_classes  # |C0:t-1| + 1(bg), 19-1: 20 | 15-5: 16 | 15-1: 16...
+        self.n_new_classes = n_new_classes
+
+        self.criteria = nn.MSELoss(reduction='mean')
+
+    def forward(self, features, logit, label, prev_prototypes=None):
+
+        N, C, H, W = logit.shape
+        target = torch.zeros_like(logit, device=logit.device).float()
+        for cls_idx in label.unique():
+            if cls_idx in [0, self.ignore_index]:
+                continue
+            target[:, int(cls_idx) - self.n_old_classes] = (label == int(cls_idx)).float()
+
+        small_target = F.interpolate(target, size=features.shape[2:], mode='bilinear', align_corners=False)
+        new_center = F.normalize(features, p=2, dim=1).unsqueeze(1) * small_target.unsqueeze(2)
+        new_center = F.normalize(new_center.sum(dim=[0, 3, 4]), p=2, dim=1)
+
+        dist_pp = torch.norm(new_center.unsqueeze(0) - prev_prototypes.unsqueeze(1), p=2, dim=2)
+        l_neg = (1 / dist_pp.min(0).values).mean()
+
+        return l_neg

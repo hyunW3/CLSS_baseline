@@ -1,21 +1,23 @@
 {
-    "name" : "MiB",
-    "method": "MiB",
+    "name": "base",
+    "method": "base",
+    "n_gpu": 1,
+    "multiprocessing_distributed": false,
+    "rank": 0,
     "world_size": 1,
-    "rank" : 0,
     "dist_backend": "nccl",
-    "dist_url": "tcp://127.0.0.1:12345",
+    "dist_url": "tcp://127.0.0.1:12346",
     "set_deterministic" : false,
     "seed": 1,
     "use_amp": true,
     "arch": {
         "type": "DeepLabV3",
         "args": {
-            "output_stride": 16, 
-            "norm_act": "iabn_sync", 
-            "backbone_pretrained": true, 
-            "freeze_all_bn": false 
-        }   
+            "output_stride": 16,
+            "norm_act": "iabn_sync",
+            "backbone_pretrained": true,
+            "freeze_all_bn": false
+        }
     },
     "data_loader": {
         "type": "VOCIncrementalDataLoader",
@@ -44,7 +46,7 @@
                     "transform_args": {
                         "crop_size": 512
                     },
-                    "masking_value": 255
+                    "masking_value": 0
                 },
                 "batch_size": 1
             },
@@ -54,7 +56,7 @@
                     "transform_args": {
                         "crop_size": 512
                     },
-                    "masking_value": 255
+                    "masking_value": 0
                 },
                 "batch_size": 1
             },
@@ -67,14 +69,17 @@
         "type": "SGD",
         "args": {
             "lr": 1e-3,
-            "weight_decay": 1e-4, 
+            "weight_decay": 1e-4,
             "momentum": 0.9,
             "nesterov": true
         }
     },
     "hyperparameter": {
-        "alpha" : 1.0,
-        "kd" : 0.0
+        "pos_weight": 1,
+        "ce": 1,
+        "mbce" : 1,
+        "bce" : 1,
+        "ocfm" : 10000
     },
     "lr_scheduler": {
         "type": "PolyLR",
@@ -90,7 +95,7 @@
         "Mean_Intersection_over_Union"
     ],
     "trainer": {
-        "epochs": 30, 
+        "epochs": 60,
         "save_dir": "saved_voc/",
         "save_period": -1,
         "validation_period": -1,

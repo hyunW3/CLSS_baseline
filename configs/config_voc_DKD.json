@@ -37,7 +37,7 @@
                     },
                     "masking_value": 0
                 },
-                "batch_size": 4
+                "batch_size": 12
             },
             "val": {
                 "cross_val": false,
